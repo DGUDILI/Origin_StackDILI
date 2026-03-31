@@ -2,6 +2,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import sys
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -15,6 +16,11 @@ SRC_DIR    = os.path.join(ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 from model import CrossAttentionEncoder
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--pooling", choices=["cls", "mean"], default="cls")
+args = parser.parse_args()
+POOLING = args.pooling
+
 os.makedirs(OUT_DIR, exist_ok=True)
 
 K, D_K     = 16, 32
@@ -26,7 +32,7 @@ SEED       = 42
 
 print("=" * 60)
 print("Step 3: Cross-Attention Pre-training (Stage 1)")
-print(f"  k={K}, d_k={D_K}, lr={LR}, epochs={EPOCHS}, patience={PATIENCE}")
+print(f"  pooling={POOLING}, k={K}, d_k={D_K}, lr={LR}, epochs={EPOCHS}, patience={PATIENCE}")
 print("=" * 60)
 
 torch.manual_seed(SEED)
@@ -39,8 +45,8 @@ def load(name):
 
 fp_train   = load("fp_k16_train.npy")
 fp_test    = load("fp_k16_test.npy")
-cham_train = load("cham_k16_train.npy")
-cham_test  = load("cham_k16_test.npy")
+cham_train = load(f"cham_k16_train_{POOLING}.npy")
+cham_test  = load(f"cham_k16_test_{POOLING}.npy")
 y_train    = load("y_train.npy")
 y_test     = load("y_test.npy")
 
@@ -93,7 +99,7 @@ for epoch in range(1, EPOCHS + 1):
             print(f"\n  Early stop at epoch {epoch}")
             break
 
-save_path = os.path.join(OUT_DIR, "pretrained_encoder.pt")
+save_path = os.path.join(OUT_DIR, f"pretrained_encoder_{POOLING}.pt")
 torch.save(best_state, save_path)
 print(f"\nBest test AUC: {best_auc:.4f}")
 print(f"Saved: {save_path}")
