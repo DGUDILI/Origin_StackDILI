@@ -8,8 +8,11 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 
 ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR   = os.path.join(ROOT, "data")
-DATA_PATH  = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
+_USE_CLEAN = os.environ.get("USE_CLEAN_DATA", "0") == "1"
+_suffix    = "_clean" if _USE_CLEAN else ""
+DATA_DIR   = os.path.join(ROOT, f"data{_suffix}")
+_STACKDILI_ROOT = os.environ.get("STACKDILI_ROOT", os.path.dirname(ROOT))
+DATA_PATH  = os.path.join(_STACKDILI_ROOT, "Data", f"Dataset{_suffix}.csv")
 MODEL_NAME = "seyonec/ChemBERTa-zinc-base-v1"
 BATCH_SIZE = 32
 MAX_LENGTH = 512

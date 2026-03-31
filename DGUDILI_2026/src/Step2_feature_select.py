@@ -9,9 +9,12 @@ from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.preprocessing import StandardScaler
 
 ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR  = os.path.join(ROOT, "data")
-DATA_PATH = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
-FEAT_PATH = r"C:\DGUDILI\Origin_StackDILI\Code\Dataset_feature.csv"
+_USE_CLEAN = os.environ.get("USE_CLEAN_DATA", "0") == "1"
+_suffix    = "_clean" if _USE_CLEAN else ""
+DATA_DIR  = os.path.join(ROOT, f"data{_suffix}")
+_STACKDILI_ROOT = os.environ.get("STACKDILI_ROOT", os.path.dirname(ROOT))
+DATA_PATH = os.path.join(_STACKDILI_ROOT, "Data", f"Dataset{_suffix}.csv")
+FEAT_PATH = os.path.join(_STACKDILI_ROOT, "Code", f"Dataset_feature{_suffix}.csv")
 K = 16
 
 os.makedirs(DATA_DIR, exist_ok=True)

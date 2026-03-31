@@ -9,8 +9,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import roc_auc_score
 
 ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR   = os.path.join(ROOT, "data")
-OUT_DIR    = os.path.join(ROOT, "outputs")
+_USE_CLEAN = os.environ.get("USE_CLEAN_DATA", "0") == "1"
+_suffix    = "_clean" if _USE_CLEAN else ""
+DATA_DIR   = os.path.join(ROOT, f"data{_suffix}")
+OUT_DIR    = os.path.join(ROOT, f"outputs{_suffix}")
 SRC_DIR    = os.path.join(ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 from model import CrossAttentionEncoder
