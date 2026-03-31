@@ -33,7 +33,7 @@ print("Step 4: 16-dim Extraction + Logistic Regression (Stage 2)")
 print("=" * 60)
 print(f"Pooling: {POOLING}")
 
-enc_path = os.path.join(OUT_DIR, f"pretrained_encoder_{POOLING}.pt")
+enc_path = os.path.join(OUT_DIR, f"pretrained_encoder_tune_{POOLING}.pt")
 assert os.path.exists(enc_path), f"Missing: {enc_path}\nRun Step3 first."
 
 device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -97,7 +97,7 @@ print("=" * 70)
 print(f"\nFeature count: StackDILI ~209 (GA)  ->  DGUDILI 16 (Cross-Attention)")
 
 results_df = pd.DataFrame([baseline, dgudili], index=["StackDILI", f"DGUDILI_2026_{POOLING}"])
-csv_path = os.path.join(OUT_DIR, f"results_comparison_{POOLING}.csv")
+csv_path = os.path.join(OUT_DIR, f"results_comparison_tune_{POOLING}.csv")
 results_df.to_csv(csv_path)
 print(f"Saved: {csv_path}")
 print("Step 4 OK")
