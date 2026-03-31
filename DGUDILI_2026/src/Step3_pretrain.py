@@ -45,8 +45,8 @@ def load(name):
 
 fp_train   = load("fp_k16_train.npy")
 fp_test    = load("fp_k16_test.npy")
-cham_train = load(f"cham_k16_train_{POOLING}.npy")
-cham_test  = load(f"cham_k16_test_{POOLING}.npy")
+cham_train = load(f"cham_full_train_{POOLING}.npy")
+cham_test  = load(f"cham_full_test_{POOLING}.npy")
 y_train    = load("y_train.npy")
 y_test     = load("y_test.npy")
 

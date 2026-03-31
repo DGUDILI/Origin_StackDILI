@@ -50,8 +50,8 @@ def load_t(name):
 
 fp_train   = load_t("fp_k16_train.npy")
 fp_test    = load_t("fp_k16_test.npy")
-cham_train = load_t(f"cham_k16_train_{POOLING}.npy")
-cham_test  = load_t(f"cham_k16_test_{POOLING}.npy")
+cham_train = load_t(f"cham_full_train_{POOLING}.npy")
+cham_test  = load_t(f"cham_full_test_{POOLING}.npy")
 y_train    = np.load(os.path.join(DATA_DIR, "y_train.npy"))
 y_test     = np.load(os.path.join(DATA_DIR, "y_test.npy"))
 

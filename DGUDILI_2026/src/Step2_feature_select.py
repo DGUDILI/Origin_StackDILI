@@ -23,7 +23,7 @@ POOLING = args.pooling
 os.makedirs(DATA_DIR, exist_ok=True)
 
 print("=" * 60)
-print("Step 2: Feature Selection (SelectKBest k=16)")
+print("Step 2: FP SelectKBest(k=16) + Full ChemBERTa Scaling")
 print("=" * 60)
 print(f"Pooling: {POOLING}")
 
@@ -61,7 +61,7 @@ X_fp_train = scaler_fp.fit_transform(X_fp_train).astype(np.float32)
 X_fp_test  = scaler_fp.transform(X_fp_test).astype(np.float32)
 print(f"  Selected FP features: {selected_fp_names}")
 
-# ChemBERTa SelectKBest
+# ChemBERTa full embedding
 emb_path   = os.path.join(DATA_DIR, f"chemberta_embeddings_{POOLING}.npy")
 order_path = os.path.join(DATA_DIR, "smiles_order.npy")
 assert os.path.exists(emb_path), f"Missing: {emb_path}\nRun Step1 first."
@@ -70,24 +70,21 @@ embeddings   = np.load(emb_path)
 smiles_order = np.load(order_path, allow_pickle=True)
 assert list(smiles_order) == list(df_meta["SMILES"]), "Embedding SMILES order mismatch"
 
-print(f"\n[ChemBERTa] SelectKBest(f_classif, k={K}) fit on train...")
-sel_cham = SelectKBest(f_classif, k=K)
-sel_cham.fit(embeddings[train_mask], y_all[train_mask])
-cham_idx = sel_cham.get_support(indices=True)
+print(f"\n[ChemBERTa] Full embedding + StandardScaler (no SelectKBest)")
+X_cham_train = embeddings[train_mask].astype(np.float32)
+X_cham_test  = embeddings[test_mask].astype(np.float32)
 
-X_cham_train = embeddings[train_mask][:, cham_idx].astype(np.float32)
-X_cham_test  = embeddings[test_mask][:, cham_idx].astype(np.float32)
 scaler_cham  = StandardScaler()
 X_cham_train = scaler_cham.fit_transform(X_cham_train).astype(np.float32)
 X_cham_test  = scaler_cham.transform(X_cham_test).astype(np.float32)
-print(f"  Selected ChemBERTa dims: {cham_idx.tolist()}")
+print(f"  ChemBERTa full shape: train={X_cham_train.shape}, test={X_cham_test.shape}")
 
 # Save
 np.save(os.path.join(DATA_DIR, "fp_k16_train.npy"), X_fp_train)
 np.save(os.path.join(DATA_DIR, "fp_k16_test.npy"),  X_fp_test)
 
-np.save(os.path.join(DATA_DIR, f"cham_k16_train_{POOLING}.npy"), X_cham_train)
-np.save(os.path.join(DATA_DIR, f"cham_k16_test_{POOLING}.npy"),  X_cham_test)
+np.save(os.path.join(DATA_DIR, f"cham_full_train_{POOLING}.npy"), X_cham_train)
+np.save(os.path.join(DATA_DIR, f"cham_full_test_{POOLING}.npy"),  X_cham_test)
 
 np.save(os.path.join(DATA_DIR, "y_train.npy"), y_all[train_mask])
 np.save(os.path.join(DATA_DIR, "y_test.npy"),  y_all[test_mask])
@@ -95,18 +92,15 @@ np.save(os.path.join(DATA_DIR, "y_test.npy"),  y_all[test_mask])
 with open(os.path.join(DATA_DIR, "selected_fp_features.json"), "w") as f:
     json.dump(selected_fp_names, f, indent=2)
 
-with open(os.path.join(DATA_DIR, f"selected_cham_dims_{POOLING}.json"), "w") as f:
-    json.dump(cham_idx.tolist(), f, indent=2)
-
-with open(os.path.join(DATA_DIR, f"scalers_{POOLING}.pkl"), "wb") as f:
+with open(os.path.join(DATA_DIR, f"scalers_full_{POOLING}.pkl"), "wb") as f:
     pickle.dump({"fp": scaler_fp, "cham": scaler_cham}, f)
 
 # Verify
 for name, exp in [
-    ("fp_k16_train.npy",                (train_mask.sum(), K)),
-    ("fp_k16_test.npy",                 (test_mask.sum(),  K)),
-    (f"cham_k16_train_{POOLING}.npy",   (train_mask.sum(), K)),
-    (f"cham_k16_test_{POOLING}.npy",    (test_mask.sum(),  K)),
+    ("fp_k16_train.npy",               (train_mask.sum(), K)),
+    ("fp_k16_test.npy",                (test_mask.sum(),  K)),
+    (f"cham_full_train_{POOLING}.npy", (train_mask.sum(), 768)),
+    (f"cham_full_test_{POOLING}.npy",  (test_mask.sum(),  768)),
 ]:
     arr = np.load(os.path.join(DATA_DIR, name))
     assert arr.shape == exp and not np.isnan(arr).any(), f"Verify failed: {name}"
