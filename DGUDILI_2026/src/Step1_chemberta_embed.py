@@ -11,7 +11,8 @@ from transformers import AutoTokenizer, AutoModel
 ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR   = os.path.join(ROOT, "data")
 DATA_PATH  = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
-MODEL_NAME = "seyonec/ChemBERTa-zinc-base-v1"
+
+MODEL_NAME = "DeepChem/ChemBERTa-77M-MLM"
 BATCH_SIZE = 32
 MAX_LENGTH = 512
 
@@ -26,6 +27,7 @@ POOLING = args.pooling
 print("=" * 60)
 print("Step 1: ChemBERTa Embedding Extraction")
 print("=" * 60)
+print(f"Model: {MODEL_NAME}")
 print(f"Pooling: {POOLING}")
 
 df = pd.read_csv(DATA_PATH)
@@ -58,12 +60,12 @@ for i in range(0, len(smiles_list), BATCH_SIZE):
     with torch.no_grad():
         out = model(**enc)
 
-    hidden = out.last_hidden_state  # (B, L, 768)
+    hidden = out.last_hidden_state
 
     if POOLING == "cls":
         pooled = hidden[:, 0, :]
     else:
-        attention_mask = enc["attention_mask"].unsqueeze(-1)  # (B, L, 1)
+        attention_mask = enc["attention_mask"].unsqueeze(-1)
         masked_hidden = hidden * attention_mask
         pooled = masked_hidden.sum(dim=1) / attention_mask.sum(dim=1).clamp(min=1)
 
@@ -75,8 +77,10 @@ for i in range(0, len(smiles_list), BATCH_SIZE):
 embeddings = np.vstack(all_embeddings).astype(np.float32)
 print(f"\nEmbedding shape: {embeddings.shape}")
 
-assert embeddings.shape == (len(smiles_list), 768)
+hidden_dim = embeddings.shape[1]
+assert embeddings.shape == (len(smiles_list), hidden_dim)
 assert not np.isnan(embeddings).any(), "NaN found"
+print(f"Hidden dim: {hidden_dim}")
 
 emb_path   = os.path.join(DATA_DIR, f"chemberta_embeddings_{POOLING}.npy")
 order_path = os.path.join(DATA_DIR, "smiles_order.npy")

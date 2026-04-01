@@ -70,6 +70,8 @@ embeddings   = np.load(emb_path)
 smiles_order = np.load(order_path, allow_pickle=True)
 assert list(smiles_order) == list(df_meta["SMILES"]), "Embedding SMILES order mismatch"
 
+hidden_dim = embeddings.shape[1]
+
 print(f"\n[ChemBERTa] Full embedding + StandardScaler (no SelectKBest)")
 X_cham_train = embeddings[train_mask].astype(np.float32)
 X_cham_test  = embeddings[test_mask].astype(np.float32)
@@ -78,6 +80,7 @@ scaler_cham  = StandardScaler()
 X_cham_train = scaler_cham.fit_transform(X_cham_train).astype(np.float32)
 X_cham_test  = scaler_cham.transform(X_cham_test).astype(np.float32)
 print(f"  ChemBERTa full shape: train={X_cham_train.shape}, test={X_cham_test.shape}")
+print(f"  Hidden dim: {hidden_dim}")
 
 # Save
 np.save(os.path.join(DATA_DIR, "fp_k16_train.npy"), X_fp_train)
@@ -99,8 +102,8 @@ with open(os.path.join(DATA_DIR, f"scalers_full_{POOLING}.pkl"), "wb") as f:
 for name, exp in [
     ("fp_k16_train.npy",               (train_mask.sum(), K)),
     ("fp_k16_test.npy",                (test_mask.sum(),  K)),
-    (f"cham_full_train_{POOLING}.npy", (train_mask.sum(), 768)),
-    (f"cham_full_test_{POOLING}.npy",  (test_mask.sum(),  768)),
+    (f"cham_full_train_{POOLING}.npy", (train_mask.sum(), hidden_dim)),
+    (f"cham_full_test_{POOLING}.npy",  (test_mask.sum(),  hidden_dim)),
 ]:
     arr = np.load(os.path.join(DATA_DIR, name))
     assert arr.shape == exp and not np.isnan(arr).any(), f"Verify failed: {name}"
