@@ -27,7 +27,7 @@ class CrossAttentionEncoder(nn.Module):
         chem_hidden_dim: int = 128,
         k: int = 16,
         d_k: int = 32,
-        dropout: float = 0.1,
+        dropout: float = 0.3,
     ):
         super().__init__()
         self.chem_in_dim = chem_in_dim
