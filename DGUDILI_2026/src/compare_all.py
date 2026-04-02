@@ -195,6 +195,66 @@ if os.path.exists(_mbv2_pt) and os.path.exists(_mbv2_sc):
 else:
     print("[SKIP] ModeBV2: checkpoint not found")
 
+# 6. ModeB-32 (single seed)
+_mb32_pt = os.path.join(OUT_DIR, "modeB32_best.pt")
+_mb32_sc = os.path.join(DATA_DIR, "scalers_modeB32.pkl")
+if os.path.exists(_mb32_pt) and os.path.exists(_mb32_sc):
+    try:
+        from group_model_b import GroupCrossAttentionModB_32
+        m = GroupCrossAttentionModB_32(d_model=64, d_out=32,
+                                       dropout=0.0, dropout_pre=0.0).to(device)
+        m.load_state_dict(torch.load(_mb32_pt, map_location=device))
+        sc = load_scalers(_mb32_sc)
+        fp_t, lm_t = get_test_tensors(sc["fp"], sc["lm"])
+        results["ModeB-32"] = compute_metrics(infer(m, fp_t, lm_t))
+        print("[OK] ModeB-32")
+    except Exception as e:
+        print(f"[SKIP] ModeB-32: {e}")
+else:
+    print("[SKIP] ModeB-32: checkpoint not found")
+
+# 7. ModeB-32 Ensemble x5
+_ens32_seeds = [42, 0, 7, 21, 99]
+_ens32_sc    = os.path.join(DATA_DIR, "scalers_ensemble32.pkl")
+_ens32_pts   = [os.path.join(OUT_DIR, f"ensemble32_seed{s}.pt") for s in _ens32_seeds]
+if all(os.path.exists(p) for p in _ens32_pts) and os.path.exists(_ens32_sc):
+    try:
+        from group_model_b import GroupCrossAttentionModB_32
+        sc = load_scalers(_ens32_sc)
+        fp_t, lm_t = get_test_tensors(sc["fp"], sc["lm"])
+        all_proba = np.zeros(len(y_test))
+        for s, pt in zip(_ens32_seeds, _ens32_pts):
+            m = GroupCrossAttentionModB_32(d_model=64, d_out=32,
+                                           dropout=0.0, dropout_pre=0.0).to(device)
+            m.load_state_dict(torch.load(pt, map_location=device))
+            all_proba += infer(m, fp_t, lm_t)
+        results["ModeB-32_Ensemble_x5"] = compute_metrics(
+            all_proba / len(_ens32_seeds)
+        )
+        print("[OK] ModeB-32_Ensemble_x5")
+    except Exception as e:
+        print(f"[SKIP] ModeB-32_Ensemble_x5: {e}")
+else:
+    print("[SKIP] ModeB-32_Ensemble_x5: checkpoint(s) not found")
+
+# 8. ModeB-32 + SWA
+_swa_pt = os.path.join(OUT_DIR, "modeB32_swa_best.pt")
+_swa_sc = os.path.join(DATA_DIR, "scalers_modeB32_swa.pkl")
+if os.path.exists(_swa_pt) and os.path.exists(_swa_sc):
+    try:
+        from group_model_b import GroupCrossAttentionModB_32
+        m = GroupCrossAttentionModB_32(d_model=64, d_out=32,
+                                       dropout=0.0, dropout_pre=0.0).to(device)
+        m.load_state_dict(torch.load(_swa_pt, map_location=device))
+        sc = load_scalers(_swa_sc)
+        fp_t, lm_t = get_test_tensors(sc["fp"], sc["lm"])
+        results["ModeB-32_SWA"] = compute_metrics(infer(m, fp_t, lm_t))
+        print("[OK] ModeB-32_SWA")
+    except Exception as e:
+        print(f"[SKIP] ModeB-32_SWA: {e}")
+else:
+    print("[SKIP] ModeB-32_SWA: checkpoint not found")
+
 # ── 결과 테이블 출력 ──────────────────────────────────────────────
 COLS = ["AUC", "MCC", "F1", "ACC", "Precision", "Sensitivity", "Specificity"]
 col_w = 8
