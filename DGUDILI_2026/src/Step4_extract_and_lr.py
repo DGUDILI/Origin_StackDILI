@@ -86,7 +86,6 @@ classifiers = {
                          random_state=SEED),
 }
 
-baseline = {
 _baseline_defaults = {
     "AUC": 0.9736, "MCC": 0.8304, "F1": 0.9010, "ACC": 0.9159,
     "Precision": 0.8650, "Sensitivity": 0.9402, "Specificity": 0.8993,

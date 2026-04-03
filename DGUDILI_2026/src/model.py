@@ -10,16 +10,16 @@ class CrossAttentionEncoder(nn.Module):
     """
     Experiment 12: Experiment 8 structure + ChemBERTa-2 backbone
 
-    ChemBERTa input: (B, 384)
+    ChemBERTa input: (B, 768)   # seyonec/ChemBERTa-zinc-base-v1
     FP input:        (B, 16)
 
     Projection:
-        LayerNorm -> Linear(384,128) -> GELU -> Dropout(0.3) -> Linear(128,16)
+        LayerNorm -> Linear(768,128) -> GELU -> Dropout(0.3) -> Linear(128,16)
     """
 
     def __init__(
         self,
-        chem_in_dim: int = 384,
+        chem_in_dim: int = 768,
         chem_hidden_dim: int = 128,
         k: int = 16,
         d_k: int = 32,

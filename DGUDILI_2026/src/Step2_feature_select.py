@@ -10,10 +10,6 @@ from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from sklearn.preprocessing import StandardScaler, RobustScaler
 
 ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR  = os.path.join(ROOT, "data")
-DATA_PATH = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
-FEAT_PATH = r"C:\DGUDILI\Origin_StackDILI\Code\Dataset_feature.csv"
-K    = 16
 SEED = 42
 
 parser = argparse.ArgumentParser()
