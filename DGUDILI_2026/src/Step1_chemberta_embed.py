@@ -9,10 +9,6 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 
 ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR   = os.path.join(ROOT, "data")
-DATA_PATH  = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
-
-MODEL_NAME = "DeepChem/ChemBERTa-77M-MLM"
 _USE_CLEAN = os.environ.get("USE_CLEAN_DATA", "0") == "1"
 _suffix    = "_clean" if _USE_CLEAN else ""
 DATA_DIR   = os.path.join(ROOT, f"data{_suffix}")
