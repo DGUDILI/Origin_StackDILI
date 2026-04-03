@@ -4,6 +4,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 import random
 import argparse
+import json
 import numpy as np
 import pandas as pd
 import torch
@@ -16,9 +17,11 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, confusion_matrix,
 )
 
-ROOT     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(ROOT, "data")
-OUT_DIR  = os.path.join(ROOT, "outputs")
+ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_USE_CLEAN = os.environ.get("USE_CLEAN_DATA", "0") == "1"
+_suffix    = "_clean" if _USE_CLEAN else ""
+DATA_DIR   = os.path.join(ROOT, f"data{_suffix}")
+OUT_DIR    = os.path.join(ROOT, f"outputs{_suffix}")
 SRC_DIR  = os.path.join(ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 from model import CrossAttentionEncoder
@@ -84,9 +87,22 @@ classifiers = {
 }
 
 baseline = {
+_baseline_defaults = {
     "AUC": 0.9736, "MCC": 0.8304, "F1": 0.9010, "ACC": 0.9159,
     "Precision": 0.8650, "Sensitivity": 0.9402, "Specificity": 0.8993,
 }
+_baseline_json = os.path.join(OUT_DIR, "stackdili_baseline.json")
+if os.path.exists(_baseline_json):
+    with open(_baseline_json) as f:
+        baseline = json.load(f)
+    print(f"StackDILI baseline loaded from: {_baseline_json}")
+elif _USE_CLEAN:
+    print("[WARN] outputs_clean/stackdili_baseline.json not found.")
+    print("       Run compute_stackdili_clean_baseline.py first for a fair comparison.")
+    print("       Falling back to original StackDILI metrics (NOT comparable).")
+    baseline = _baseline_defaults
+else:
+    baseline = _baseline_defaults
 
 cols = ["AUC", "MCC", "F1", "ACC", "Precision", "Sensitivity", "Specificity"]
 all_results = {"StackDILI": baseline}

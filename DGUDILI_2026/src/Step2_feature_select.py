@@ -20,6 +20,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--pooling", choices=["cls", "mean"], default="cls")
 args = parser.parse_args()
 POOLING = args.pooling
+_USE_CLEAN = os.environ.get("USE_CLEAN_DATA", "0") == "1"
+_suffix    = "_clean" if _USE_CLEAN else ""
+DATA_DIR  = os.path.join(ROOT, f"data{_suffix}")
+_STACKDILI_ROOT = os.environ.get("STACKDILI_ROOT", os.path.dirname(ROOT))
+DATA_PATH = os.path.join(_STACKDILI_ROOT, "Data", f"Dataset{_suffix}.csv")
+FEAT_PATH = os.path.join(_STACKDILI_ROOT, "Code", f"Dataset_feature{_suffix}.csv")
+K = 16
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
