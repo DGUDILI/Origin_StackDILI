@@ -23,6 +23,7 @@ class CrossAttentionEncoder(nn.Module):
         chem_hidden_dim: int = 128,
         k: int = 16,
         d_k: int = 32,
+        d_v: int = 16,
         dropout: float = 0.3,
     ):
         super().__init__()
@@ -30,6 +31,7 @@ class CrossAttentionEncoder(nn.Module):
         self.chem_hidden_dim = chem_hidden_dim
         self.k = k
         self.d_k = d_k
+        self.d_v = d_v
         self.scale = math.sqrt(d_k)
 
         self.chem_proj = nn.Sequential(
@@ -42,7 +44,8 @@ class CrossAttentionEncoder(nn.Module):
 
         self.W_Q = nn.Linear(1, d_k)
         self.W_K = nn.Linear(1, d_k)
-        self.W_V = nn.Linear(1, 1)
+        self.W_V = nn.Linear(1, d_v)
+        self.W_O = nn.Linear(d_v, 1)
 
         self.head = nn.Linear(k, 1)
 
@@ -58,9 +61,10 @@ class CrossAttentionEncoder(nn.Module):
 
         scores = torch.bmm(Q, K.transpose(1, 2)) / self.scale
         weights = torch.softmax(scores, dim=-1)
-        attn = torch.bmm(weights, V)
+        attn = torch.bmm(weights, V)   # (B, k, d_v)
+        attn = self.W_O(attn)           # (B, k, 1)
 
-        return attn.squeeze(-1)
+        return attn.squeeze(-1)         # (B, k)
 
     def forward(self, x_cham: torch.Tensor, x_fp: torch.Tensor) -> torch.Tensor:
         return self.head(self.encode(x_cham, x_fp))

@@ -6,14 +6,15 @@ import pickle
 import argparse
 import numpy as np
 import pandas as pd
-from sklearn.feature_selection import SelectKBest, f_classif
-from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, mutual_info_classif
+from sklearn.preprocessing import StandardScaler, RobustScaler
 
 ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR  = os.path.join(ROOT, "data")
 DATA_PATH = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
 FEAT_PATH = r"C:\DGUDILI\Origin_StackDILI\Code\Dataset_feature.csv"
-K = 16
+K    = 16
+SEED = 42
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--pooling", choices=["cls", "mean"], default="cls")
@@ -48,15 +49,16 @@ print(f"Train labels: p={int(y_tr.sum())}, n={int((1-y_tr).sum())}")
 print(f"Test  labels: p={int(y_te.sum())}, n={int((1-y_te).sum())}")
 
 # FP SelectKBest
-print(f"\n[FP] SelectKBest(f_classif, k={K}) fit on train...")
-sel_fp = SelectKBest(f_classif, k=K)
+np.random.seed(SEED)   # mutual_info_classif 재현성 보장
+print(f"\n[FP] SelectKBest(mutual_info_classif, k={K}) fit on train...")
+sel_fp = SelectKBest(mutual_info_classif, k=K)
 sel_fp.fit(X_fp_all[train_mask], y_all[train_mask])
 fp_idx = sel_fp.get_support(indices=True)
 selected_fp_names = [feat_cols[i] for i in fp_idx]
 
 X_fp_train = X_fp_all[train_mask][:, fp_idx]
 X_fp_test  = X_fp_all[test_mask][:, fp_idx]
-scaler_fp  = StandardScaler()
+scaler_fp  = RobustScaler()
 X_fp_train = scaler_fp.fit_transform(X_fp_train).astype(np.float32)
 X_fp_test  = scaler_fp.transform(X_fp_test).astype(np.float32)
 print(f"  Selected FP features: {selected_fp_names}")

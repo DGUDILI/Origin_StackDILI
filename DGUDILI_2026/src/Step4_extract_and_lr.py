@@ -2,11 +2,15 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import sys
+import random
 import argparse
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
 from sklearn.metrics import (
     roc_auc_score, matthews_corrcoef, f1_score,
     accuracy_score, precision_score, recall_score, confusion_matrix,
@@ -27,9 +31,16 @@ POOLING = args.pooling
 os.makedirs(OUT_DIR, exist_ok=True)
 
 K, D_K = 16, 32
+SEED   = 42
+
+# ── 재현성 시드 설정 ──────────────────────────────────────────────────
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
 
 print("=" * 60)
-print("Step 4: 16-dim Extraction + Logistic Regression (Stage 2)")
+print("Step 4: 16-dim Extraction + Multi-Classifier Comparison (Stage 2)")
 print("=" * 60)
 print(f"Pooling: {POOLING}")
 
@@ -61,42 +72,61 @@ with torch.no_grad():
 
 print(f"Feature Space: train={X_train_16.shape}, test={X_test_16.shape}")
 
-lr_model = LogisticRegression(max_iter=1000, random_state=42)
-lr_model.fit(X_train_16, y_train)
-print("LogisticRegression trained")
-
-proba = lr_model.predict_proba(X_test_16)[:, 1]
-pred  = lr_model.predict(X_test_16)
-tn, fp_, fn, tp = confusion_matrix(y_test, pred).ravel()
-
-dgudili = {
-    "AUC":         roc_auc_score(y_test, proba),
-    "MCC":         matthews_corrcoef(y_test, pred),
-    "F1":          f1_score(y_test, pred),
-    "ACC":         accuracy_score(y_test, pred),
-    "Precision":   precision_score(y_test, pred),
-    "Sensitivity": recall_score(y_test, pred),
-    "Specificity": tn / (tn + fp_),
+classifiers = {
+    "LR":  LogisticRegression(max_iter=1000, random_state=SEED),
+    "MLP": MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=500,
+                         random_state=SEED, early_stopping=True),
+    "RF":  RandomForestClassifier(n_estimators=200, random_state=SEED),
+    "XGB": XGBClassifier(n_estimators=200, learning_rate=0.05,
+                         max_depth=4, subsample=0.8,
+                         use_label_encoder=False, eval_metric="logloss",
+                         random_state=SEED),
 }
+
 baseline = {
     "AUC": 0.9736, "MCC": 0.8304, "F1": 0.9010, "ACC": 0.9159,
     "Precision": 0.8650, "Sensitivity": 0.9402, "Specificity": 0.8993,
 }
 
 cols = ["AUC", "MCC", "F1", "ACC", "Precision", "Sensitivity", "Specificity"]
-print("\n" + "=" * 70)
-print(f"DGUDILI 2026 ({POOLING}) vs StackDILI  |  Test set: DILIrank (N=452)")
-print("=" * 70)
-print(f"{'':22s}" + "".join(f"{c:>11s}" for c in cols))
-print("-" * 70)
-print(f"{'StackDILI':22s}" + "".join(f"{baseline[c]:>11.4f}" for c in cols))
-print(f"{f'DGUDILI_2026_{POOLING}':22s}" + "".join(f"{dgudili[c]:>11.4f}" for c in cols))
-print("-" * 70)
-print(f"{'Delta(+up)':22s}" + "".join(f"{dgudili[c]-baseline[c]:>+11.4f}" for c in cols))
-print("=" * 70)
+all_results = {"StackDILI": baseline}
+
+for clf_name, clf in classifiers.items():
+    clf.fit(X_train_16, y_train)
+    print(f"{clf_name} trained")
+    proba = clf.predict_proba(X_test_16)[:, 1]
+    pred  = clf.predict(X_test_16)
+    tn, fp_, fn, tp = confusion_matrix(y_test, pred).ravel()
+    all_results[f"DGUDILI_{clf_name}_{POOLING}"] = {
+        "AUC":         roc_auc_score(y_test, proba),
+        "MCC":         matthews_corrcoef(y_test, pred),
+        "F1":          f1_score(y_test, pred),
+        "ACC":         accuracy_score(y_test, pred),
+        "Precision":   precision_score(y_test, pred),
+        "Sensitivity": recall_score(y_test, pred),
+        "Specificity": tn / (tn + fp_),
+    }
+
+print("\n" + "=" * 88)
+print(f"DGUDILI 2026 ({POOLING}) Classifier Comparison  |  Test set: DILIrank (N=452)")
+print("=" * 88)
+print(f"{'Model':28s}" + "".join(f"{c:>9s}" for c in cols))
+print("-" * 88)
+for row_name, metrics in all_results.items():
+    print(f"{row_name:28s}" + "".join(f"{metrics[c]:>9.4f}" for c in cols))
+print("-" * 88)
+best_key = max(
+    (k for k in all_results if k != "StackDILI"),
+    key=lambda k: all_results[k]["AUC"]
+)
+best = all_results[best_key]
+print(f"{'Delta(best vs StackDILI)':28s}" +
+      "".join(f"{best[c]-baseline[c]:>+9.4f}" for c in cols))
+print(f"  Best classifier: {best_key}")
+print("=" * 88)
 print(f"\nFeature count: StackDILI ~209 (GA)  ->  DGUDILI 16 (Cross-Attention)")
 
-results_df = pd.DataFrame([baseline, dgudili], index=["StackDILI", f"DGUDILI_2026_{POOLING}"])
+results_df = pd.DataFrame(all_results).T
 csv_path = os.path.join(OUT_DIR, f"results_comparison_tune_{POOLING}.csv")
 results_df.to_csv(csv_path)
 print(f"Saved: {csv_path}")
