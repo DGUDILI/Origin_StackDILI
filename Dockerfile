@@ -25,8 +25,8 @@ RUN pip install --no-cache-dir \
 # Pre-download ChemBERTa model into the image layer (optional but speeds up first run)
 # Comment this out if you want a smaller image
 RUN python -c "from transformers import AutoTokenizer, AutoModel; \
-    AutoTokenizer.from_pretrained('seyonec/ChemBERTa-zinc-base-v1'); \
-    AutoModel.from_pretrained('seyonec/ChemBERTa-zinc-base-v1')" || true
+    AutoTokenizer.from_pretrained('DeepChem/ChemBERTa-77M-MLM'); \
+    AutoModel.from_pretrained('DeepChem/ChemBERTa-77M-MLM')" || true
 
 # Default working directory inside the project
 WORKDIR /workspace/DGUDILI_2026

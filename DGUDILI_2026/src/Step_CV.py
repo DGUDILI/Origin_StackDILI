@@ -3,16 +3,17 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import sys
 import json
+import random
 import warnings
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
-from sklearn.feature_selection import SelectKBest, f_classif
-from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader, TensorDataset, Subset
+from sklearn.feature_selection import SelectKBest, mutual_info_classif
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from sklearn.metrics import (
     roc_auc_score, matthews_corrcoef, f1_score,
     accuracy_score, precision_score, recall_score, confusion_matrix,
@@ -31,15 +32,22 @@ _STACKDILI_ROOT = os.environ.get("STACKDILI_ROOT", os.path.dirname(ROOT))
 sys.path.insert(0, SRC_DIR)
 from model import CrossAttentionEncoder
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--pooling", choices=["cls", "mean"], default="cls")
+args = parser.parse_args()
+POOLING = args.pooling
+
 os.makedirs(OUT_DIR, exist_ok=True)
 
-K, D_K     = 16, 32
-LR_RATE    = 1e-3
-EPOCHS     = 200
-BATCH_SIZE = 32
-PATIENCE   = 20
-N_FOLDS    = 10
-SEED       = 42
+K, D_K, D_V = 16, 32, 16
+LR_RATE     = 1e-3
+EPOCHS      = 200
+BATCH_SIZE  = 32
+PATIENCE    = 20
+VAL_RATIO   = 0.2
+N_FOLDS     = 10
+SEED        = 42
 
 FEAT_PATH = os.path.join(_STACKDILI_ROOT, "Code", f"Dataset_feature{_suffix}.csv")
 DATA_PATH = os.path.join(_STACKDILI_ROOT, "Data", f"Dataset{_suffix}.csv")
@@ -49,7 +57,7 @@ for p in [FEAT_PATH, DATA_PATH]:
         print(f"[ERROR] Missing: {p}")
         sys.exit(1)
 
-emb_path = os.path.join(DATA_DIR, "chemberta_embeddings.npy")
+emb_path = os.path.join(DATA_DIR, f"chemberta_embeddings_{POOLING}.npy")
 if not os.path.exists(emb_path):
     print(f"[ERROR] Missing: {emb_path}\nRun Step1 first.")
     sys.exit(1)
@@ -84,28 +92,27 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(X_fp_all, y_all), 1):
     X_ch_tr, X_ch_te = embeddings[train_idx], embeddings[test_idx]
     y_tr, y_te = y_all[train_idx], y_all[test_idx]
 
-    # SelectKBest per fold (fit on train only)
-    sel_fp = SelectKBest(f_classif, k=K)
+    # FP: SelectKBest per fold (fit on train only)
+    np.random.seed(SEED)
+    sel_fp = SelectKBest(mutual_info_classif, k=K)
     sel_fp.fit(X_fp_tr, y_tr)
     fp_idx = sel_fp.get_support(indices=True)
     X_fp_tr, X_fp_te = X_fp_tr[:, fp_idx], X_fp_te[:, fp_idx]
 
-    sel_ch = SelectKBest(f_classif, k=K)
-    sel_ch.fit(X_ch_tr, y_tr)
-    ch_idx = sel_ch.get_support(indices=True)
-    X_ch_tr, X_ch_te = X_ch_tr[:, ch_idx], X_ch_te[:, ch_idx]
-
-    sc_fp = StandardScaler()
+    sc_fp = RobustScaler()
     X_fp_tr = sc_fp.fit_transform(X_fp_tr).astype(np.float32)
     X_fp_te = sc_fp.transform(X_fp_te).astype(np.float32)
 
+    # ChemBERTa: full embedding + StandardScaler (chem_proj inside encoder)
     sc_ch = StandardScaler()
     X_ch_tr = sc_ch.fit_transform(X_ch_tr).astype(np.float32)
     X_ch_te = sc_ch.transform(X_ch_te).astype(np.float32)
 
-    # CrossAttentionEncoder
+    # CrossAttentionEncoder (chem_proj 내장, full 768-dim 입력)
+    random.seed(SEED)
+    np.random.seed(SEED)
     torch.manual_seed(SEED)
-    encoder   = CrossAttentionEncoder(k=K, d_k=D_K).to(device)
+    encoder   = CrossAttentionEncoder(k=K, d_k=D_K, d_v=D_V).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=LR_RATE)
 
@@ -115,26 +122,42 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(X_fp_all, y_all), 1):
     fp_te_t = torch.tensor(X_fp_te).to(device)
     ch_te_t = torch.tensor(X_ch_te).to(device)
 
-    dl = DataLoader(TensorDataset(ch_tr_t, fp_tr_t, y_tr_t),
-                    batch_size=BATCH_SIZE, shuffle=True)
+    # train/val split (stratified) for early stopping
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=VAL_RATIO, random_state=SEED)
+    tr_idx, val_idx = next(sss.split(np.zeros(len(y_tr)), y_tr))
 
-    best_auc, best_state, patience_cnt = -1.0, None, 0
+    full_ds  = TensorDataset(ch_tr_t, fp_tr_t, y_tr_t)
+    train_ds = Subset(full_ds, tr_idx)
+    val_ds   = Subset(full_ds, val_idx)
+
+    dl     = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    val_dl = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False)
+
+    best_val_auc, best_state, patience_cnt = -1.0, None, 0
 
     for epoch in range(1, EPOCHS + 1):
         encoder.train()
         for x_c, x_f, y_b in dl:
+            x_c, x_f, y_b = x_c.to(device), x_f.to(device), y_b.to(device)
             optimizer.zero_grad()
             loss = criterion(encoder(x_c, x_f).squeeze(1), y_b)
             loss.backward()
             optimizer.step()
 
         encoder.eval()
+        val_logits, val_labels = [], []
         with torch.no_grad():
-            p_val = torch.sigmoid(encoder(ch_te_t, fp_te_t)).squeeze(1).cpu().numpy()
-        auc_val = roc_auc_score(y_te, p_val)
+            for x_c, x_f, y_b in val_dl:
+                x_c, x_f, y_b = x_c.to(device), x_f.to(device), y_b.to(device)
+                val_logits.append(torch.sigmoid(encoder(x_c, x_f).squeeze(1)).cpu())
+                val_labels.append(y_b.cpu())
+        auc_val = roc_auc_score(
+            torch.cat(val_labels).numpy(),
+            torch.cat(val_logits).numpy()
+        )
 
-        if auc_val > best_auc:
-            best_auc     = auc_val
+        if auc_val > best_val_auc:
+            best_val_auc = auc_val
             best_state   = {k: v.cpu().clone() for k, v in encoder.state_dict().items()}
             patience_cnt = 0
         else:
@@ -167,7 +190,7 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(X_fp_all, y_all), 1):
         "Specificity": float(tn / (tn + fp_)),
     }
     fold_metrics.append(m)
-    print(f"  AUC={m['AUC']:.4f}  MCC={m['MCC']:.4f}  F1={m['F1']:.4f}  (best encoder AUC={best_auc:.4f})")
+    print(f"  AUC={m['AUC']:.4f}  MCC={m['MCC']:.4f}  F1={m['F1']:.4f}  (best encoder AUC={best_val_auc:.4f})")
 
 # Average metrics
 avg = {c: float(np.mean([m[c] for m in fold_metrics])) for c in cols}

@@ -8,48 +8,63 @@ import torch.nn as nn
 
 class CrossAttentionEncoder(nn.Module):
     """
-    FP(지문)와 ChemBERTa 피처 각 k=16개를 Cross-Attention으로 융합.
-    d_v=1 고정 → 출력: (B, k, 1) → squeeze → (B, k) Feature Space
-    Q ← ChemBERTa (query), K/V ← FP (key/value)
+    Experiment 12: Experiment 8 structure + ChemBERTa-2 backbone
+
+    ChemBERTa input: (B, 384)   # DeepChem/ChemBERTa-77M-MLM
+    FP input:        (B, 16)
+
+    Projection:
+        LayerNorm -> Linear(384,128) -> GELU -> Dropout(0.3) -> Linear(128,16)
     """
 
-    def __init__(self, k: int = 16, d_k: int = 32):
+    def __init__(
+        self,
+        chem_in_dim: int = 384,
+        chem_hidden_dim: int = 128,
+        k: int = 16,
+        d_k: int = 32,
+        d_v: int = 16,
+        dropout: float = 0.3,
+    ):
         super().__init__()
+        self.chem_in_dim = chem_in_dim
+        self.chem_hidden_dim = chem_hidden_dim
         self.k = k
         self.d_k = d_k
+        self.d_v = d_v
         self.scale = math.sqrt(d_k)
 
-        # 각 피처(스칼라)를 d_k 차원으로 투영
-        self.W_Q = nn.Linear(1, d_k)   # ChemBERTa → Query
-        self.W_K = nn.Linear(1, d_k)   # FP → Key
-        self.W_V = nn.Linear(1, 1)     # FP → Value  (d_v=1 고정)
+        self.chem_proj = nn.Sequential(
+            nn.LayerNorm(chem_in_dim),
+            nn.Linear(chem_in_dim, chem_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(chem_hidden_dim, k),
+        )
 
-        # Stage 1 사전학습용 임시 분류 head
+        self.W_Q = nn.Linear(1, d_k)
+        self.W_K = nn.Linear(1, d_k)
+        self.W_V = nn.Linear(1, d_v)
+        self.W_O = nn.Linear(d_v, 1)
+
         self.head = nn.Linear(k, 1)
 
     def encode(self, x_cham: torch.Tensor, x_fp: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x_cham: (B, k) — 선택된 ChemBERTa 피처 (스케일링됨)
-            x_fp:   (B, k) — 선택된 FP 피처 (스케일링됨)
-        Returns:
-            (B, k) — Feature Space (k=16)
-        """
-        # (B, k) → (B, k, 1): 각 피처를 1-dim 토큰으로 취급
-        q_in = x_cham.unsqueeze(-1)   # (B, k, 1)
-        k_in = x_fp.unsqueeze(-1)     # (B, k, 1)
+        x_cham_proj = self.chem_proj(x_cham)
 
-        Q = self.W_Q(q_in)            # (B, k, d_k)
-        K = self.W_K(k_in)            # (B, k, d_k)
-        V = self.W_V(k_in)            # (B, k, 1)
+        q_in = x_cham_proj.unsqueeze(-1)
+        k_in = x_fp.unsqueeze(-1)
 
-        # Scaled dot-product attention
-        scores  = torch.bmm(Q, K.transpose(1, 2)) / self.scale  # (B, k, k)
-        weights = torch.softmax(scores, dim=-1)                   # (B, k, k)
-        attn    = torch.bmm(weights, V)                           # (B, k, 1)
+        Q = self.W_Q(q_in)
+        K = self.W_K(k_in)
+        V = self.W_V(k_in)
 
-        return attn.squeeze(-1)        # (B, k)  ← Feature Space
+        scores = torch.bmm(Q, K.transpose(1, 2)) / self.scale
+        weights = torch.softmax(scores, dim=-1)
+        attn = torch.bmm(weights, V)   # (B, k, d_v)
+        attn = self.W_O(attn)           # (B, k, 1)
+
+        return attn.squeeze(-1)         # (B, k)
 
     def forward(self, x_cham: torch.Tensor, x_fp: torch.Tensor) -> torch.Tensor:
-        """Stage 1 사전학습용: encode → head → logit (B, 1)"""
         return self.head(self.encode(x_cham, x_fp))
