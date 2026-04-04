@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DGUDILI 2026 — Pipeline Overview</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+    :root {
+      --stackdili-color: #3B6EE8;
+      --dgudili-color:   #E84040;
+      --neutral-bg:      #F7F8FC;
+      --card-bg:         #FFFFFF;
+      --border:          #E2E8F0;
+      --text-primary:    #1A202C;
+      --text-secondary:  #64748B;
+      --accent-green:    #22C55E;
+      --section-label:   #FEF3E2;
+      --section-border:  #F59E0B;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--neutral-bg);
+      color: var(--text-primary);
+      padding: 36px 24px;
+      min-height: 100vh;
+    }
+
+    h1.page-title {
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      margin-bottom: 6px;
+    }
+    .page-subtitle {
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      margin-bottom: 36px;
+    }
+
+    /* ─── Section label (row header) ─── */
+    .section-label {
+      background: var(--section-label);
+      border: 1.5px solid var(--section-border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: 700;
+      font-size: 0.8rem;
+      color: #92400E;
+      white-space: nowrap;
+      writing-mode: horizontal-tb;
+      min-width: 130px;
+      text-align: center;
+    }
+
+    /* ─── Architecture table ─── */
+    .arch-wrapper {
+      background: var(--card-bg);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 28px 24px;
+      margin-bottom: 28px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+    }
+
+    .arch-wrapper h2 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .arch-grid {
+      display: grid;
+      grid-template-columns: 140px 1fr 1fr;
+      gap: 10px 16px;
+      align-items: center;
+    }
+
+    /* header row */
+    .col-header {
+      text-align: center;
+      font-weight: 700;
+      font-size: 0.88rem;
+      padding: 10px 8px;
+      border-radius: 10px;
+    }
+    .col-header.stackdili {
+      color: var(--stackdili-color);
+      background: #EEF2FF;
+      border: 2px solid var(--stackdili-color);
+    }
+    .col-header.dgudili {
+      color: var(--dgudili-color);
+      background: #FEF2F2;
+      border: 2px solid var(--dgudili-color);
+    }
+
+    /* cell */
+    .cell {
+      background: var(--neutral-bg);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+    .cell.stackdili { border-left: 4px solid var(--stackdili-color); }
+    .cell.dgudili   { border-left: 4px solid var(--dgudili-color); }
+
+    .cell strong { font-weight: 600; display: block; margin-bottom: 3px; }
+    .cell .tag {
+      display: inline-block;
+      background: #F1F5F9;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font-size: 0.72rem;
+      padding: 2px 7px;
+      margin: 2px 2px 0 0;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .cell .tag.blue  { background: #EEF2FF; border-color: #C7D2FE; color: var(--stackdili-color); }
+    .cell .tag.red   { background: #FEF2F2; border-color: #FECACA; color: var(--dgudili-color); }
+    .cell .tag.green { background: #F0FDF4; border-color: #BBF7D0; color: #16A34A; }
+
+    /* arrow connector */
+    .arrow-row {
+      display: contents;
+    }
+    .arrow-cell {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 1.3rem;
+      color: #94A3B8;
+      padding: 0;
+    }
+
+    /* divider row */
+    .grid-divider {
+      grid-column: 1 / -1;
+      border: none;
+      border-top: 1px dashed var(--border);
+      margin: 4px 0;
+    }
+
+    /* ─── Execution flow table ─── */
+    .exec-wrapper {
+      background: var(--card-bg);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 28px 24px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+    }
+
+    .exec-wrapper h2 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+
+    table.exec-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    table.exec-table th {
+      background: #F1F5F9;
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      font-weight: 700;
+      text-align: center;
+    }
+    table.exec-table th.cmd-header {
+      background: #1E293B;
+      color: #FFF;
+      font-family: 'Courier New', monospace;
+      font-size: 0.8rem;
+    }
+
+    table.exec-table td {
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      vertical-align: top;
+      line-height: 1.6;
+    }
+    table.exec-table td.cmd-col {
+      font-family: 'Courier New', monospace;
+      font-size: 0.78rem;
+      background: #0F172A;
+      color: #7DD3FC;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    table.exec-table td.note-col {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+    }
+
+    /* flow steps inside cells */
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: center;
+      margin-top: 4px;
+    }
+    .step-badge {
+      border-radius: 6px;
+      padding: 3px 9px;
+      font-size: 0.73rem;
+      font-weight: 600;
+    }
+    .step-badge.blue  { background: #EEF2FF; color: var(--stackdili-color); border: 1px solid #C7D2FE; }
+    .step-badge.red   { background: #FEF2F2; color: var(--dgudili-color);   border: 1px solid #FECACA; }
+    .step-badge.gray  { background: #F1F5F9; color: #475569;                border: 1px solid #CBD5E1; }
+    .step-badge.green { background: #F0FDF4; color: #16A34A;                border: 1px solid #BBF7D0; }
+    .arrow-sep { color: #94A3B8; font-size: 0.85rem; }
+
+    /* data badge */
+    .data-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.73rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-bottom: 6px;
+    }
+    .data-badge.original { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+    .data-badge.clean    { background: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
+
+    /* legend */
+    .legend {
+      display: flex;
+      gap: 18px;
+      justify-content: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .legend-dot {
+      width: 12px; height: 12px;
+      border-radius: 3px;
+    }
+
+    .perf-note {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      font-style: italic;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1 class="page-title">DGUDILI 2026 — Pipeline Overview</h1>
+  <p class="page-subtitle">StackDILI vs DGUDILI 모델 구조 · 실행 환경(env1 / env2) · 데이터(Original / Clean)</p>
+
+  <!-- ────────────────────────────────────────────────────────────── -->
+  <!-- 1. Architecture comparison                                    -->
+  <!-- ────────────────────────────────────────────────────────────── -->
+  <div class="arch-wrapper">
+    <h2>📐 Model Architecture Comparison</h2>
+
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-dot" style="background:var(--stackdili-color)"></div>
+        StackDILI (JCIM, 2025)
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:var(--dgudili-color)"></div>
+        DGUDILI (Dongguk, 2026)
+      </div>
+    </div>
+
+    <div class="arch-grid">
+
+      <!-- header -->
+      <div></div>
+      <div class="col-header stackdili">StackDILI<br/><span style="font-weight:400;font-size:0.75rem;">JCIM, 2025</span></div>
+      <div class="col-header dgudili">DGUDILI<br/><span style="font-weight:400;font-size:0.75rem;">Dongguk, 2026</span></div>
+
+      <hr class="grid-divider"/>
+
+      <!-- Performance -->
+      <div class="section-label">🏆 Performance</div>
+      <div class="cell stackdili">
+        <strong>기준 성능 (Test: DILIrank)</strong>
+        AUC: <b>0.9736</b> &nbsp;|&nbsp; MCC: <b>0.8304</b><br/>
+        F1: 0.9010 &nbsp;|&nbsp; ACC: 0.9159<br/>
+        Sens: 0.9402 &nbsp;|&nbsp; Spec: 0.8993
+      </div>
+      <div class="cell dgudili">
+        <strong>env1 최고 (Test: DILIrank)</strong>
+        LR / MLP / RF / XGB 중 AUC 최고 모델 반환<br/>
+        <span class="perf-note">→ results_comparison_tune_{pooling}.csv 저장</span><br/>
+        <strong style="margin-top:6px;">env2 (10-Fold CV)</strong>
+        평균 AUC ± std<br/>
+        <span class="perf-note">→ results_cv.csv 저장</span>
+      </div>
+
+      <!-- arrow -->
+      <div></div>
+      <div class="arrow-cell">⬆</div>
+      <div class="arrow-cell">⬆</div>
+
+      <!-- Classifier -->
+      <div class="section-label">🤖 Classifier</div>
+      <div class="cell stackdili">
+        <strong>Stacking Ensemble</strong>
+        Base: <span class="tag blue">RF</span><span class="tag blue">ET</span><span class="tag blue">HistGB</span><span class="tag blue">XGBoost</span><br/>
+        Meta: <span class="tag blue">Logistic Regression</span><br/>
+        <span class="perf-note">내부 5-fold CV OOF로 meta-learner 학습</span>
+      </div>
+      <div class="cell dgudili">
+        <strong>env1</strong> — 4 classifier 비교<br/>
+        <span class="tag red">LR</span><span class="tag red">MLP</span><span class="tag red">RF</span><span class="tag red">XGBoost</span><br/>
+        <strong style="margin-top:6px;">env2 (CV)</strong> — Logistic Regression<br/>
+        <span class="tag red">LR</span>
+        <span class="perf-note">16-dim Feature Space 위에서 학습</span>
+      </div>
+
+      <!-- arrow -->
+      <div></div>
+      <div class="arrow-cell">⬆</div>
+      <div class="arrow-cell">⬆</div>
+
+      <!-- Feature Space -->
+      <div class="section-label">🔲 Feature Space</div>
+      <div class="cell stackdili">
+        <strong>GA 선택 피처 ~209개</strong>
+        <span class="tag blue">FP only</span><br/>
+        Genetic Algorithm으로 최적 FP subset 탐색
+      </div>
+      <div class="cell dgudili">
+        <strong>Cross-Attention Output — k=16</strong>
+        <span class="tag red">FP ⊕ ChemBERTa 융합</span><br/>
+        Attention: Q←ChemBERTa(16), K/V←FP(16)<br/>
+        → <b>(B, 16)</b> feature 벡터
+      </div>
+
+      <!-- arrow -->
+      <div></div>
+      <div class="arrow-cell">⬆</div>
+      <div class="arrow-cell">⬆</div>
+
+      <!-- Feature Selection -->
+      <div class="section-label">🔍 Feature Selection</div>
+      <div class="cell stackdili">
+        <strong>Genetic Algorithm</strong>
+        전체 FP (~1190-dim)에서 최적 subset 탐색<br/>
+        <span class="tag blue">fit on train split만 적용</span>
+      </div>
+      <div class="cell dgudili">
+        <strong>SelectKBest (mutual_info_classif, k=16)</strong>
+        FP → top-16<br/>
+        ChemBERTa → full 768-dim, StandardScaler만 적용 → chem_proj(768→128→16)는 encoder 내부<br/>
+        <span class="tag red">fit on train split만 적용</span>
+      </div>
+
+      <!-- arrow -->
+      <div></div>
+      <div class="arrow-cell">⬆</div>
+      <div class="arrow-cell">⬆</div>
+
+      <!-- Data Encoding -->
+      <div class="section-label">🧬 Data Encoding</div>
+      <div class="cell stackdili">
+        <strong>Fingerprint (FP)</strong>
+        <span class="tag blue">MACCS k=166</span> + <span class="tag blue">ECFP k=1024</span><br/>
+        Total: <b>1190-dim</b><br/>
+        <span class="perf-note">Dataset_feature.csv에서 로드</span>
+      </div>
+      <div class="cell dgudili">
+        <strong>FP + ChemBERTa</strong>
+        <span class="tag red">FP 425-dim</span> (Dataset_feature.csv)<br/>
+        <span class="tag red">ChemBERTa 768-dim</span><br/>
+        Model: <code style="font-size:0.71rem;">seyonec/ChemBERTa-zinc-base-v1</code><br/>
+        Pooling: <span class="tag">CLS</span> or <span class="tag">Mean</span>
+      </div>
+
+      <!-- arrow -->
+      <div></div>
+      <div class="arrow-cell">⬆</div>
+      <div class="arrow-cell">⬆</div>
+
+      <!-- Benchmark -->
+      <div class="section-label">📊 Benchmark</div>
+      <div class="cell stackdili" style="grid-column: 2 / 4; border-left: 4px solid #7C3AED;">
+        <strong>StackDILI Dataset (공통)</strong>
+        <span class="tag" style="background:#EDE9FE;border-color:#C4B5FD;color:#5B21B6;">TRAIN</span>
+        ref ≠ DILIrank &nbsp;→&nbsp; <b>1,398 samples</b> &nbsp;(pos=768, neg=630)<br/>
+        <span class="tag" style="background:#EDE9FE;border-color:#C4B5FD;color:#5B21B6;">TEST</span>
+        ref = DILIrank &nbsp;→&nbsp; <b>452 samples</b> &nbsp;(pos=184, neg=268)
+        <span class="perf-note">&nbsp;*&nbsp;env2(CV)는 전체 1,850 샘플을 10-fold로 분리</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────────────────────── -->
+  <!-- 2. Execution flow                                             -->
+  <!-- ────────────────────────────────────────────────────────────── -->
+  <div class="exec-wrapper">
+    <h2>⚙️ Execution Flow — <code style="font-size:0.88rem;">./run.sh &lt;cmd&gt; [env1|env2]</code></h2>
+
+    <table class="exec-table">
+      <thead>
+        <tr>
+          <th class="cmd-header" style="width:220px;">명령어</th>
+          <th>데이터</th>
+          <th>실행 방식</th>
+          <th>실행 단계 (순서)</th>
+          <th>비고</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- run env1 (default) -->
+        <tr>
+          <td class="cmd-col">./run.sh run</td>
+          <td>
+            <span class="data-badge original">● Original</span><br/>
+            Dataset.csv<br/>Dataset_feature.csv
+          </td>
+          <td><span class="step-badge blue">env1</span><br/>고정 분할<br/>(train/test)</td>
+          <td>
+            <div class="flow">
+              <span class="step-badge red">Step1</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step2</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step3</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step4</span>
+            </div>
+            <div style="font-size:0.73rem;color:#64748B;margin-top:5px;">
+              ChemBERTa embed → FP select → CrossAttn pretrain → Extract + LR/MLP/RF/XGB
+            </div>
+          </td>
+          <td class="note-col">
+            StackDILI baseline: 하드코딩 기본값 사용<br/>
+            <code style="font-size:0.72rem;">outputs/</code> 에 결과 저장
+          </td>
+        </tr>
+
+        <!-- run env2 -->
+        <tr>
+          <td class="cmd-col">./run.sh run env2</td>
+          <td>
+            <span class="data-badge original">● Original</span><br/>
+            Dataset.csv<br/>Dataset_feature.csv
+          </td>
+          <td><span class="step-badge blue">env2</span><br/>10-Fold CV<br/>(전체 데이터)</td>
+          <td>
+            <div class="flow">
+              <span class="step-badge red">Step1</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge blue">cv_baseline</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step_CV</span>
+            </div>
+            <div style="font-size:0.73rem;color:#64748B;margin-top:5px;">
+              ChemBERTa embed → StackDILI 10-fold 재학습 → DGUDILI 10-fold CV
+            </div>
+          </td>
+          <td class="note-col">
+            StackDILI CV baseline: <code style="font-size:0.72rem;">compute_stackdili_cv_baseline.py</code><br/>
+            <code style="font-size:0.72rem;">outputs_cv/</code> 에 결과 저장<br/>
+            Classifier: LR only
+          </td>
+        </tr>
+
+        <tr style="background:#FFFBEB;">
+          <td colspan="5" style="padding:6px 14px;font-size:0.75rem;color:#92400E;font-weight:600;text-align:center;">
+            ── Clean 데이터: 중복 SMILES 제거 버전 (Dataset_clean.csv / Dataset_feature_clean.csv) ──
+          </td>
+        </tr>
+
+        <!-- run-clean env1 -->
+        <tr>
+          <td class="cmd-col">./run.sh run-clean</td>
+          <td>
+            <span class="data-badge clean">● Clean</span><br/>
+            Dataset_clean.csv<br/>Dataset_feature_clean.csv
+          </td>
+          <td><span class="step-badge blue">env1</span><br/>고정 분할<br/>(train/test)</td>
+          <td>
+            <div class="flow">
+              <span class="step-badge gray">make_clean</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge blue">clean_baseline</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step1</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step2</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step3</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step4</span>
+            </div>
+            <div style="font-size:0.73rem;color:#64748B;margin-top:5px;">
+              Clean 데이터 생성 → StackDILI clean 재학습 → DGUDILI pipeline (USE_CLEAN_DATA=1)
+            </div>
+          </td>
+          <td class="note-col">
+            StackDILI baseline: <code style="font-size:0.72rem;">compute_stackdili_clean_baseline.py</code><br/>
+            → <code style="font-size:0.72rem;">outputs_clean/stackdili_baseline.json</code><br/>
+            <code style="font-size:0.72rem;">data_clean/ / outputs_clean/</code> 사용<br/>
+            Step4에서 json 로드하여 비교
+          </td>
+        </tr>
+
+        <!-- run-clean env2 -->
+        <tr>
+          <td class="cmd-col">./run.sh run-clean env2</td>
+          <td>
+            <span class="data-badge clean">● Clean</span><br/>
+            Dataset_clean.csv<br/>Dataset_feature_clean.csv
+          </td>
+          <td><span class="step-badge blue">env2</span><br/>10-Fold CV<br/>(전체 데이터)</td>
+          <td>
+            <div class="flow">
+              <span class="step-badge gray">make_clean</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step1</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge blue">cv_baseline</span>
+              <span class="arrow-sep">→</span>
+              <span class="step-badge red">Step_CV</span>
+            </div>
+            <div style="font-size:0.73rem;color:#64748B;margin-top:5px;">
+              Clean 데이터 생성 → ChemBERTa embed → StackDILI CV clean → DGUDILI CV (USE_CLEAN_DATA=1)
+            </div>
+          </td>
+          <td class="note-col">
+            cv_baseline: <code style="font-size:0.72rem;">USE_CLEAN_DATA=1</code> 플래그<br/>
+            → <code style="font-size:0.72rem;">outputs_cv_clean/stackdili_baseline.json</code><br/>
+            Step_CV에서 json 로드하여 비교
+          </td>
+        </tr>
+
+      </tbody>
+    </table>
+
+    <!-- env variable note -->
+    <div style="margin-top:18px;padding:14px 16px;background:#F8FAFC;border:1px solid var(--border);border-radius:10px;font-size:0.78rem;line-height:1.8;">
+      <b>🔑 환경변수 (Docker → run.sh에서 자동 주입)</b>
+      <table style="width:100%;margin-top:8px;border-collapse:collapse;">
+        <tr>
+          <td style="width:220px;font-family:monospace;font-size:0.77rem;color:#7DD3FC;background:#0F172A;padding:4px 10px;border-radius:6px 0 0 6px;">STACKDILI_ROOT=/workspace</td>
+          <td style="padding:4px 12px;color:#475569;">프로젝트 루트. 로컬 직접 실행 시 os.path.dirname(ROOT)로 자동 계산</td>
+        </tr>
+        <tr>
+          <td style="font-family:monospace;font-size:0.77rem;color:#7DD3FC;background:#0F172A;padding:4px 10px;margin-top:4px;border-radius:6px 0 0 6px;display:block;margin-top:4px;">USE_CLEAN_DATA=0&#124;1</td>
+          <td style="padding:4px 12px;color:#475569;">0=Original (data/, outputs*), 1=Clean (data_clean/, outputs*_clean)</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Step description quick ref -->
+    <div style="margin-top:18px;padding:14px 16px;background:#F8FAFC;border:1px solid var(--border);border-radius:10px;font-size:0.78rem;line-height:1.8;">
+      <b>🗒️ 스텝별 역할 요약</b>
+      <table style="width:100%;margin-top:8px;border-collapse:collapse;font-size:0.77rem;">
+        <tr style="background:#F1F5F9;">
+          <th style="padding:5px 10px;text-align:left;border:1px solid var(--border);">스텝</th>
+          <th style="padding:5px 10px;text-align:left;border:1px solid var(--border);">입력</th>
+          <th style="padding:5px 10px;text-align:left;border:1px solid var(--border);">출력</th>
+        </tr>
+        <tr>
+          <td style="padding:5px 10px;border:1px solid var(--border);font-weight:600;"><span class="step-badge red">Step1</span> ChemBERTa Embed</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">Dataset.csv (SMILES 컬럼)</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">chemberta_embeddings_{pooling}.npy, smiles_order.npy</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 10px;border:1px solid var(--border);font-weight:600;"><span class="step-badge red">Step2</span> Feature Select</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">Dataset.csv + Dataset_feature.csv + embed</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">fp_k16_{tr/te}.npy, cham_full_{tr/te}.npy, y_{tr/te}.npy, scalers.pkl</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 10px;border:1px solid var(--border);font-weight:600;"><span class="step-badge red">Step3</span> CrossAttn Pretrain</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">fp_k16_train, cham_full_train</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">pretrained_encoder_tune_{pooling}.pt (best val AUC)</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 10px;border:1px solid var(--border);font-weight:600;"><span class="step-badge red">Step4</span> Extract + Classify</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">encoder.pt + fp/cham train/test</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">results_comparison_tune_{pooling}.csv (LR/MLP/RF/XGB)</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 10px;border:1px solid var(--border);font-weight:600;"><span class="step-badge red">Step_CV</span> 10-Fold CV</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">Dataset.csv + embed (전체, fold 내부에서 재scaling)</td>
+          <td style="padding:5px 10px;border:1px solid var(--border);">results_cv.csv (avg ± std, vs StackDILI CV baseline)</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+</body>
+</html>
