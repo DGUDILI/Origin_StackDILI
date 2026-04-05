@@ -47,6 +47,13 @@ class E2E_FTV6StyleEncoder(nn.Module):
         self.d_v = d_v
         self.scale = math.sqrt(d_k)
 
+        # Positional embedding: Q/K 각각 분리하여 비대칭 attention 패턴 학습 가능
+        # rank-1 collapse 방지 (W_Q/W_K가 스칼라 투영이므로 위치 구별 불가 문제 해결)
+        self.pos_emb_q = nn.Parameter(torch.empty(1, k, d_k))
+        self.pos_emb_k = nn.Parameter(torch.empty(1, k, d_k))
+        nn.init.normal_(self.pos_emb_q, std=0.02)
+        nn.init.normal_(self.pos_emb_k, std=0.02)
+
         self.chem_proj = nn.Sequential(
             nn.LayerNorm(chem_in_dim),
             nn.Linear(chem_in_dim, 128),
@@ -87,6 +94,10 @@ class E2E_FTV6StyleEncoder(nn.Module):
         Q = self.W_Q(q.unsqueeze(-1))    # (B, k, d_k)
         K = self.W_K(kv.unsqueeze(-1))   # (B, k, d_k)
         V = self.W_V(kv.unsqueeze(-1))   # (B, k, d_v)
+
+        # 위치 정보 주입: Q/K 독립 pos_emb → 비대칭 attention 가능
+        Q = Q + self.pos_emb_q           # (B, k, d_k)
+        K = K + self.pos_emb_k           # (B, k, d_k)
 
         scores  = torch.bmm(Q, K.transpose(1, 2)) / self.scale  # (B, k, k)
         weights = torch.softmax(scores, dim=-1)

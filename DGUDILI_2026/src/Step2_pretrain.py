@@ -93,16 +93,27 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
 
 class SMILESDataset(Dataset):
-    def __init__(self, smiles_list, fp_array, labels):
-        enc = tokenizer(
-            list(smiles_list),
-            max_length=MAX_LENGTH,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
-        self.input_ids      = enc["input_ids"]
-        self.attention_mask = enc["attention_mask"]
+    def __init__(self, smiles_list, fp_array, labels, cache_path=None):
+        if cache_path and os.path.exists(cache_path):
+            print(f"  [Cache] 토큰 로딩 중: {cache_path}")
+            enc = torch.load(cache_path, weights_only=False)
+            self.input_ids = enc["input_ids"]
+            self.attention_mask = enc["attention_mask"]
+        else:
+            print(f"  [Tokenize] {len(smiles_list)}개 데이터 토크나이징 중... (잠시만 기다려주세요)")
+            enc = tokenizer(
+                list(smiles_list),
+                max_length=MAX_LENGTH,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt",
+            )
+            self.input_ids = enc["input_ids"]
+            self.attention_mask = enc["attention_mask"]
+            if cache_path:
+                torch.save({"input_ids": self.input_ids, "attention_mask": self.attention_mask}, cache_path)
+                print(f"  [Cache] 토큰 저장 완료: {cache_path}")
+
         self.fp     = torch.tensor(fp_array, dtype=torch.float32)
         self.labels = torch.tensor(labels,   dtype=torch.float32)
 
@@ -118,8 +129,11 @@ class SMILESDataset(Dataset):
         )
 
 
-train_ds = SMILESDataset(smiles_train[idx_tr], fp_train[idx_tr], y_train[idx_tr])
-val_ds   = SMILESDataset(smiles_train[idx_val], fp_train[idx_val], y_train[idx_val])
+train_cache = os.path.join(DATA_DIR, f"train_tokens_{SEED}.pt")
+val_cache   = os.path.join(DATA_DIR, f"val_tokens_{SEED}.pt")
+
+train_ds = SMILESDataset(smiles_train[idx_tr], fp_train[idx_tr], y_train[idx_tr], cache_path=train_cache)
+val_ds   = SMILESDataset(smiles_train[idx_val], fp_train[idx_val], y_train[idx_val], cache_path=val_cache)
 
 train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
 val_dl   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
