@@ -112,3 +112,111 @@ class E2E_FTV6StyleEncoder(nn.Module):
         x_fp: torch.Tensor,
     ) -> torch.Tensor:
         return self.head(self.encode(input_ids, attention_mask, x_fp))
+
+
+class E2E_MHAResidualEncoder(nn.Module):
+    """
+    MHA Residual Encoder: ChemBERTa CLS + FP Latent Tokens + Residual Cross-Attention.
+
+    Pipeline:
+      SMILES → ChemBERTa (마지막 레이어만 unfreeze) → CLS (B, 384)
+      CLS  → q_proj: LN → Linear(384, d_model)      → (B, 1, d_model)  [Query]
+      FP   → fp_proj: Linear(fp_in, k*d_model)
+           → reshape (B, k, d_model) → LayerNorm     → (B, k, d_model)  [Key/Value]
+      MHA(d_model, num_heads): Q × K/V               → Attn_Out (B, 1, d_model)
+      Residual: fused = Q + Attn_Out → squeeze       → (B, d_model)
+      MLP: LN → Linear(d_model, k) → GELU → Dropout → (B, k)
+
+    Stage 1: head Linear(k, 1) + BCEWithLogitsLoss
+    Stage 2: encode() → (B, k) fused feature → Stacking OOF
+    """
+
+    def __init__(
+        self,
+        fp_in_dim: int = 425,
+        k: int = 16,
+        d_model: int = 64,
+        num_heads: int = 4,
+        dropout: float = 0.3,
+        model_name: str = "DeepChem/ChemBERTa-77M-MLM",
+    ):
+        super().__init__()
+        from transformers import AutoModel
+
+        self.chemberta = AutoModel.from_pretrained(model_name)
+        chem_in_dim: int = self.chemberta.config.hidden_size  # 384
+
+        for p in self.chemberta.parameters():
+            p.requires_grad = False
+        n_layers = len(self.chemberta.encoder.layer)
+        # 마지막 2개 레이어 unfreeze: 더 풍부한 화학 표현 학습
+        for p in self.chemberta.encoder.layer[n_layers - 2].parameters():
+            p.requires_grad = True
+        for p in self.chemberta.encoder.layer[n_layers - 1].parameters():
+            p.requires_grad = True
+
+        self.k = k
+        self.d_model = d_model
+
+        # ChemBERTa CLS → d_model (Query)
+        self.q_proj = nn.Sequential(
+            nn.LayerNorm(chem_in_dim),
+            nn.Linear(chem_in_dim, d_model),
+        )
+
+        # FP → k개의 d_model-dim 잠재 토큰 (Key/Value)
+        self.fp_proj = nn.Linear(fp_in_dim, k * d_model)
+        self.fp_drop = nn.Dropout(0.1)
+        self.fp_ln   = nn.LayerNorm(d_model)
+
+        # Multi-Head Cross-Attention
+        self.mha = nn.MultiheadAttention(
+            embed_dim=d_model, num_heads=num_heads,
+            dropout=0.1, batch_first=True,
+        )
+
+        # MLP bottleneck: d_model → k
+        self.mlp = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, k),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+        self.head = nn.Linear(k, 1)
+
+    def _cls_embed(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        out = self.chemberta(input_ids=input_ids, attention_mask=attention_mask)
+        return out.last_hidden_state[:, 0, :]  # (B, 384)
+
+    def encode(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        x_fp: torch.Tensor,
+    ) -> torch.Tensor:
+        """returns (B, k) fused feature vector"""
+        x_chem = self._cls_embed(input_ids, attention_mask)   # (B, 384)
+
+        # Query: (B, 1, d_model)
+        q = self.q_proj(x_chem).unsqueeze(1)
+
+        # Key/Value: (B, k, d_model)
+        kv = self.fp_drop(self.fp_proj(x_fp))                 # (B, k*d_model)
+        kv = self.fp_ln(kv.view(-1, self.k, self.d_model))    # (B, k, d_model)
+
+        # Cross-Attention + Residual
+        attn_out, _ = self.mha(q, kv, kv)                     # (B, 1, d_model)
+        fused = (q + attn_out).squeeze(1)                     # (B, d_model)
+
+        return self.mlp(fused)                                 # (B, k)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        x_fp: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.head(self.encode(input_ids, attention_mask, x_fp))

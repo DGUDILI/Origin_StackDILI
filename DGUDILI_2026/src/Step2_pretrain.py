@@ -3,146 +3,78 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import sys
 import pickle
-import random
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from transformers import AutoTokenizer
 
-ROOT     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(ROOT, "data")
-OUT_DIR  = os.path.join(ROOT, "outputs")
-SRC_DIR  = os.path.join(ROOT, "src")
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SRC_DIR)
-from model import E2E_FTV6StyleEncoder
-
-DATA_PATH = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
-FEAT_PATH = r"C:\DGUDILI\Origin_StackDILI\Code\Dataset_feature.csv"
+from config import (
+    K, D_MODEL, NUM_HEADS, DROPOUT, MODEL_NAME,
+    BATCH_SIZE, MAX_LENGTH, SEED, EPOCHS, PATIENCE,
+    LR_CHEM, LR_OTHER, WEIGHT_DECAY,
+    SCHED_PATIENCE, SCHED_FACTOR, SCHED_MIN_LR,
+    DATA_DIR, OUT_DIR,
+)
+from utils import set_seed, SMILESDataset
+from model import E2E_MHAResidualEncoder
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
-K             = 16
-D_K           = 32
-D_V           = 1
-LR_CHEM       = 1e-4   # ChemBERTa 마지막 레이어
-LR_OTHER      = 3e-4   # CrossAttn + Projection
-WEIGHT_DECAY  = 1e-4
-EPOCHS        = 200
-BATCH_SIZE    = 16
-PATIENCE      = 30
-SCHED_PATIENCE = 8
-SCHED_FACTOR  = 0.5
-SCHED_MIN_LR  = 1e-5
-MAX_LENGTH    = 256
-SEED          = 42
-MODEL_NAME    = "DeepChem/ChemBERTa-77M-MLM"
-
 print("=" * 65)
-print("Step 2: E2E_FTV6StyleEncoder Pre-training (Stage 1)")
-print(f"  ChemBERTa last-layer lr={LR_CHEM}  |  CrossAttn/Proj lr={LR_OTHER}")
-print(f"  k={K}, d_k={D_K}, d_v={D_V}  |  feature_dim={K*D_V}")
+print("Step 2: E2E_MHAResidualEncoder Pre-training (Stage 1)")
+print(f"  ChemBERTa last-layer lr={LR_CHEM}  |  MHA/Proj lr={LR_OTHER}")
+print(f"  k={K}, d_model={D_MODEL}, num_heads={NUM_HEADS}  |  feature_dim={K}")
 print(f"  epochs={EPOCHS}, batch={BATCH_SIZE}, patience={PATIENCE}, early_stop=val_AUC")
 print("=" * 65)
 
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
+set_seed(SEED)
 
-# ── 데이터 로드 ──────────────────────────────────────────────────────────────
-df_meta = pd.read_csv(DATA_PATH)
-df_feat = pd.read_csv(FEAT_PATH)
-assert list(df_meta["SMILES"]) == list(df_feat["SMILES"]), "SMILES order mismatch"
+# ── 데이터 로드 (Step1 저장 npy 사용) ────────────────────────────────────────────
+fp_train_path = os.path.join(DATA_DIR, "fp_full_train.npy")
+assert os.path.exists(fp_train_path), f"Missing: {fp_train_path}\nRun Step1 first."
 
-feat_cols  = [c for c in df_feat.columns if c not in ["SMILES", "Label", "ref"]]
-X_fp_all   = df_feat[feat_cols].values.astype(np.float32)
-y_all      = df_feat["Label"].values.astype(np.float32)
-ref_all    = df_feat["ref"].values
-smiles_all = df_meta["SMILES"].values
+fp_train     = np.load(fp_train_path)
+y_train      = np.load(os.path.join(DATA_DIR, "y_train.npy"))
+smiles_train = np.load(os.path.join(DATA_DIR, "smiles_train.npy"), allow_pickle=True)
+fp_in_dim    = fp_train.shape[1]
+n_pos_tr = int(y_train.sum()); n_neg_tr = len(y_train) - n_pos_tr
+print(f"Train: {len(y_train)}  |  FP: {fp_in_dim}-dim  |  pos={n_pos_tr}, neg={n_neg_tr}")
 
-train_mask = ref_all != "DILIrank"
-
-smiles_train = smiles_all[train_mask]
-y_train      = y_all[train_mask]
-
-scaler_path = os.path.join(DATA_DIR, "scalers.pkl")
-assert os.path.exists(scaler_path), f"Missing: {scaler_path}\nRun Step1 first."
-with open(scaler_path, "rb") as f:
-    scalers = pickle.load(f)
-scaler_fp = scalers["fp"]
-
-fp_train  = scaler_fp.transform(X_fp_all[train_mask]).astype(np.float32)
-fp_in_dim = fp_train.shape[1]
-print(f"Train: {len(y_train)}  |  FP: {fp_in_dim}-dim")
-
-# ── Train / Val 분리 ─────────────────────────────────────────────────────────
+# ── Train / Val 분리 ─────────────────────────────────────────────────────────────
 idx = np.arange(len(y_train))
 idx_tr, idx_val = train_test_split(
     idx, test_size=0.15, stratify=y_train.astype(int), random_state=SEED
 )
 print(f"  train subset: {len(idx_tr)}, val subset: {len(idx_val)}")
 
-# ── Tokenizer & Dataset ──────────────────────────────────────────────────────
+# ── Tokenizer & Dataset ──────────────────────────────────────────────────────────
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-
-class SMILESDataset(Dataset):
-    def __init__(self, smiles_list, fp_array, labels, cache_path=None):
-        if cache_path and os.path.exists(cache_path):
-            print(f"  [Cache] 토큰 로딩 중: {cache_path}")
-            enc = torch.load(cache_path, weights_only=False)
-            self.input_ids = enc["input_ids"]
-            self.attention_mask = enc["attention_mask"]
-        else:
-            print(f"  [Tokenize] {len(smiles_list)}개 데이터 토크나이징 중... (잠시만 기다려주세요)")
-            enc = tokenizer(
-                list(smiles_list),
-                max_length=MAX_LENGTH,
-                padding="max_length",
-                truncation=True,
-                return_tensors="pt",
-            )
-            self.input_ids = enc["input_ids"]
-            self.attention_mask = enc["attention_mask"]
-            if cache_path:
-                torch.save({"input_ids": self.input_ids, "attention_mask": self.attention_mask}, cache_path)
-                print(f"  [Cache] 토큰 저장 완료: {cache_path}")
-
-        self.fp     = torch.tensor(fp_array, dtype=torch.float32)
-        self.labels = torch.tensor(labels,   dtype=torch.float32)
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        return (
-            self.input_ids[idx],
-            self.attention_mask[idx],
-            self.fp[idx],
-            self.labels[idx],
-        )
-
 
 train_cache = os.path.join(DATA_DIR, f"train_tokens_{SEED}.pt")
 val_cache   = os.path.join(DATA_DIR, f"val_tokens_{SEED}.pt")
 
-train_ds = SMILESDataset(smiles_train[idx_tr], fp_train[idx_tr], y_train[idx_tr], cache_path=train_cache)
-val_ds   = SMILESDataset(smiles_train[idx_val], fp_train[idx_val], y_train[idx_val], cache_path=val_cache)
+train_ds = SMILESDataset(
+    smiles_train[idx_tr], fp_train[idx_tr], tokenizer, MAX_LENGTH,
+    labels=y_train[idx_tr], cache_path=train_cache,
+)
+val_ds = SMILESDataset(
+    smiles_train[idx_val], fp_train[idx_val], tokenizer, MAX_LENGTH,
+    labels=y_train[idx_val], cache_path=val_cache,
+)
 
 train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
 val_dl   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-# ── 모델 ─────────────────────────────────────────────────────────────────────
+# ── 모델 ─────────────────────────────────────────────────────────────────────────
 device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-encoder = E2E_FTV6StyleEncoder(
-    fp_in_dim=fp_in_dim, k=K, d_k=D_K, d_v=D_V, dropout=0.3,
-    model_name=MODEL_NAME,
+encoder = E2E_MHAResidualEncoder(
+    fp_in_dim=fp_in_dim, k=K, d_model=D_MODEL, num_heads=NUM_HEADS,
+    dropout=DROPOUT, model_name=MODEL_NAME,
 ).to(device)
 
 n_layers = len(encoder.chemberta.encoder.layer)
@@ -151,12 +83,15 @@ trainable = sum(p.numel() for p in encoder.parameters() if p.requires_grad)
 total     = sum(p.numel() for p in encoder.parameters())
 print(f"Parameters: trainable={trainable:,} / total={total:,}  |  Device: {device}")
 
-# ── 차등 학습률 ──────────────────────────────────────────────────────────────
-last_layer_ids = {id(p) for p in encoder.chemberta.encoder.layer[n_layers - 1].parameters()}
+# ── 차등 학습률 ──────────────────────────────────────────────────────────────────
+last_layer_ids   = {id(p) for p in encoder.chemberta.encoder.layer[n_layers - 1].parameters()}
+second_layer_ids = {id(p) for p in encoder.chemberta.encoder.layer[n_layers - 2].parameters()}
+chem_ids = last_layer_ids | second_layer_ids
 optimizer = torch.optim.AdamW(
     [
-        {"params": [p for p in encoder.parameters() if id(p) in last_layer_ids],     "lr": LR_CHEM},
-        {"params": [p for p in encoder.parameters() if id(p) not in last_layer_ids], "lr": LR_OTHER},
+        {"params": [p for p in encoder.parameters() if id(p) in last_layer_ids],          "lr": LR_CHEM},        # 1e-4
+        {"params": [p for p in encoder.parameters() if id(p) in second_layer_ids],        "lr": LR_CHEM * 0.3},  # 3e-5
+        {"params": [p for p in encoder.parameters() if id(p) not in chem_ids],            "lr": LR_OTHER},       # 3e-4
     ],
     weight_decay=WEIGHT_DECAY,
 )
@@ -164,10 +99,11 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode="max", factor=SCHED_FACTOR,
     patience=SCHED_PATIENCE, min_lr=SCHED_MIN_LR,
 )
+# mild pos_weight: train 내부 비율만 보정 (0.56보다 완만하게)
 criterion = nn.BCEWithLogitsLoss()
 
 
-# ── 추론 헬퍼 ────────────────────────────────────────────────────────────────
+# ── 추론 헬퍼 ────────────────────────────────────────────────────────────────────
 def run_inference(model, dl):
     model.eval()
     all_logits, all_proba = [], []
@@ -180,7 +116,7 @@ def run_inference(model, dl):
     return torch.cat(all_logits), np.concatenate(all_proba)
 
 
-# ── 학습 루프 ─────────────────────────────────────────────────────────────────
+# ── 학습 루프 ─────────────────────────────────────────────────────────────────────
 best_val_auc, best_state, patience_cnt = 0.0, None, 0
 y_val_np = y_train[idx_val]
 y_val_t  = torch.tensor(y_val_np, dtype=torch.float32)
