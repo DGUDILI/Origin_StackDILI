@@ -77,11 +77,11 @@ if __name__ == "__main__":
     encoder.eval()
     print(f"Encoder loaded ({device})")
 
-    # ── Feature 추출 (encoder 16-dim + raw FP 425-dim 연결) ──────────────────────
+    # ── Feature 추출 (encoder 16-dim only) ──────────────────────────────────────
     enc_tr = extract_features(encoder, smiles_train, fp_train, tokenizer, device)
     enc_te = extract_features(encoder, smiles_test,  fp_test,  tokenizer, device)
-    X_train_feat = np.hstack([enc_tr, fp_train])   # (N_train, 16+425=441)
-    X_test_feat  = np.hstack([enc_te, fp_test])    # (N_test,  441)
+    X_train_feat = enc_tr   # (N_train, 16)
+    X_test_feat  = enc_te   # (N_test,  16)
     print(f"Feature shape: train={X_train_feat.shape}, test={X_test_feat.shape}")
 
     # ── 5-Fold OOF Stacking ──────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     print("-" * W)
     print(f"{'vs StackDILI':25s}"        + "".join(f"{dgudili[c]-baseline[c]:>+10.4f}" for c in cols))
     print("=" * W)
-    print(f"\nPipeline: SMILES -> ChemBERTa(E2E) + FP {fp_in_dim}-dim -> MHA Residual (d={D_MODEL}) -> {K}-dim -> Stacking")
+    print(f"\nPipeline: SMILES -> ChemBERTa(E2E) + FP {fp_in_dim}-dim -> MHA Residual (d={D_MODEL}) -> {K}-dim only -> Stacking")
 
     results_df = pd.DataFrame(
         [baseline, dgudili],
