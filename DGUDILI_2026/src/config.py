@@ -25,8 +25,11 @@ SCHED_FACTOR   = 0.5
 SCHED_MIN_LR   = 1e-5
 
 # ── 경로 ─────────────────────────────────────────────────────────────────────────
-ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR  = os.path.join(ROOT, "data")
-OUT_DIR   = os.path.join(ROOT, "outputs")
-DATA_PATH = r"C:\DGUDILI\Origin_StackDILI\Data\Dataset.csv"
-FEAT_PATH = r"C:\DGUDILI\Origin_StackDILI\Code\Dataset_feature.csv"
+ROOT             = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_USE_CLEAN       = os.environ.get("USE_CLEAN_DATA", "0") == "1"
+_suffix          = "_clean" if _USE_CLEAN else ""
+DATA_DIR         = os.path.join(ROOT, f"data{_suffix}")
+OUT_DIR          = os.path.join(ROOT, f"outputs{_suffix}")
+_STACKDILI_ROOT  = os.environ.get("STACKDILI_ROOT", os.path.dirname(ROOT))
+DATA_PATH        = os.path.join(_STACKDILI_ROOT, "Data", f"Dataset{_suffix}.csv")
+FEAT_PATH        = os.path.join(_STACKDILI_ROOT, "Code", f"Dataset_feature{_suffix}.csv")
