@@ -206,6 +206,45 @@ bash run.sh shell
 
 ---
 
+## Docker 없이 로컬에서 직접 실행
+
+Docker 없이 로컬 Python 환경에서도 실행 가능합니다.
+
+### 패키지 설치
+
+```bash
+pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+pip install numpy==1.26.4 scikit-learn==1.7.1 xgboost transformers pandas rdkit
+```
+
+재현성을 위해 `scikit-learn==1.7.1`, `numpy==1.26.4`는 버전을 맞추는 것을 권장합니다.
+
+### 실행
+
+```bash
+cd Origin_StackDILI
+
+# 환경 변수 설정 (clean 데이터는 USE_CLEAN_DATA=1)
+export STACKDILI_ROOT=$(pwd)
+export USE_CLEAN_DATA=0
+
+# env1
+python DGUDILI_2026/src/Step1_preprocess.py
+python DGUDILI_2026/src/Step2_pretrain.py
+python DGUDILI_2026/src/Step3_stacking.py
+
+# env2 (env1 실행 후)
+python DGUDILI_2026/src/Step_CV.py
+```
+
+Windows (PowerShell):
+```powershell
+$env:STACKDILI_ROOT = (Get-Location).Path
+$env:USE_CLEAN_DATA = "0"
+```
+
+---
+
 ## 환경 변수
 
 `config.py`에서 사용하는 환경 변수:
