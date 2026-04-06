@@ -17,6 +17,7 @@ bash run.sh build
 | `bash run.sh run-clean env2` | env2 — clean 데이터, 10-fold CV |
 
 > env2는 env1 실행 후 사용 가능 (encoder 파일 필요)
+> 일단 bash로 적어두긴 했는데.... WSL에서 ./run.sh 실행해도 되고... Git Bash 켜고 ./run.sh로 써도 됨!!!
 
 ---
 
