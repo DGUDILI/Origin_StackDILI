@@ -4,6 +4,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 import json
 import pickle
+import argparse
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
@@ -13,6 +14,11 @@ from config import DATA_DIR, DATA_PATH, FEAT_PATH
 from utils import load_dataset
 
 os.makedirs(DATA_DIR, exist_ok=True)
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--force", action="store_true", help="캐시 파일이 있어도 강제 재실행")
+_args, _ = parser.parse_known_args()
+FORCE = _args.force
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1-A: 기존 FP 전처리 (E2E_FTV6StyleEncoder / E2E_MHAResidualEncoder 용)
@@ -72,6 +78,15 @@ print("=" * 60)
 
 import torch
 from graph_utils import smiles_to_pyg, get_maccs, verify_maccs_mapping
+
+_train_pt = os.path.join(DATA_DIR, "train_graphs.pt")
+_test_pt  = os.path.join(DATA_DIR, "test_graphs.pt")
+if not FORCE and os.path.exists(_train_pt) and os.path.exists(_test_pt):
+    print(f"[SKIP] 캐시 파일이 이미 존재합니다. 재생성하려면 --force 플래그를 사용하세요.")
+    print(f"  {_train_pt}")
+    print(f"  {_test_pt}")
+    print("Step 1-B SKIP (cached)\n\nStep 1 전체 완료")
+    sys.exit(0)
 
 verify_maccs_mapping()
 

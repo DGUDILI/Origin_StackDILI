@@ -7,10 +7,6 @@ NUM_HEADS  = 4        # MHA 헤드 수 (d_model % num_heads == 0 조건)
 DROPOUT    = 0.3
 MODEL_NAME = "DeepChem/ChemBERTa-77M-MLM"
 
-# ── 구버전 호환 (E2E_FTV6StyleEncoder) ──────────────────────────────────────────
-D_K        = 32
-D_V        = 1
-
 # ── 학습 설정 ────────────────────────────────────────────────────────────────────
 BATCH_SIZE     = 16
 MAX_LENGTH     = 256

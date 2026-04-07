@@ -81,7 +81,7 @@ python DGUDILI_2026/src/Step3_stacking.py
 python DGUDILI_2026/src/Step_CV.py
 
 # (선택) XAI: 원자-MACCS key 상관관계 히트맵
-python DGUDILI_2026/src/Step4_xai.py "CC(=O)Oc1ccccc1C(=O)O"  # 아스피린
+python DGUDILI_2026/src/Step4_xai.py --smiles "CC(=O)Oc1ccccc1C(=O)O"  # 아스피린
 ```
 
 또는 Docker:

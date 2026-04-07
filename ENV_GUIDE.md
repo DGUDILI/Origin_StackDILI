@@ -168,8 +168,8 @@ bash run.sh run-clean env2
 ### 개별 스텝 실행 (디버깅용, env1 original 기준)
 
 ```bash
-bash run.sh step1   # Step1: FP 전처리 (StandardScaler fit)
-bash run.sh step2   # Step2: E2E_MHAResidualEncoder 학습
+bash run.sh step1   # Step1: FP/Graph/MACCS 전처리
+bash run.sh step2   # Step2: GraphMACCSEncoder 학습
 bash run.sh step3   # Step3: Feature 추출 + Stacking + 평가
 ```
 

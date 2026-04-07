@@ -88,7 +88,7 @@ if __name__ == "__main__":
     print("=" * 65)
 
     enc_path = os.path.join(OUT_DIR, "pretrained_graph_encoder.pt")
-    assert os.path.exists(enc_path), f"Missing: {enc_path}\nRun Step2 (step2-graph) first."
+    assert os.path.exists(enc_path), f"Missing: {enc_path}\nRun Step2 first: bash run.sh step2"
 
     train_cache = os.path.join(DATA_DIR, "train_graphs.pt")
     test_cache  = os.path.join(DATA_DIR, "test_graphs.pt")

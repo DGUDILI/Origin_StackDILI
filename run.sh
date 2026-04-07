@@ -105,7 +105,7 @@ case "$CMD" in
     run-graph)
         echo "[run.sh] GraphMACCSEncoder: fixed split, original data"
         run_step "Step1_preprocess.py"
-        run_step "Step2_pretrain_graph.py"
+        run_step "Step2_pretrain.py"
         run_step "Step3_stacking.py"
         echo ""
         echo "[run.sh] Done."
