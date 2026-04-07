@@ -1,0 +1,32 @@
+# DGUDILI_2026 — 중복제거(clean) 데이터 실험 config
+# Dataset_clean.csv 기반. preprocess.py 실행 시 data/clean/에 그래프 캐시 생성됨.
+
+# ── 경로 ──────────────────────────────────────────────────────────────────────
+data_dir: data/clean
+output_dir: outputs/clean
+data_csv: Data/Dataset_clean.csv
+feat_csv: Code/Dataset_feature_clean.csv
+
+# ── 모델 (원본과 동일) ──────────────────────────────────────────────────────────
+k: 32
+d_model: 64
+num_heads: 4
+dropout: 0.3
+maccs_dim: 167
+max_atoms: 100
+sage_layers: 2
+sage_hidden: 64
+atom_feat_dim: 43
+
+# ── 학습 (원본과 동일) ──────────────────────────────────────────────────────────
+batch_size: 16
+max_length: 256
+seed: 42
+epochs: 200
+patience: 30
+lr_chem: 0.0001
+lr_other: 0.0003
+weight_decay: 0.0001
+sched_patience: 8
+sched_factor: 0.5
+sched_min_lr: 0.00001

@@ -1,0 +1,33 @@
+# DGUDILI_2026 default experiment config
+# 모든 경로는 DGUDILI_2026/ 기준 상대경로 또는 절대경로.
+# data_csv / feat_csv 는 Origin_StackDILI/ 기준 상대경로.
+
+# ── 경로 ──────────────────────────────────────────────────────────────────────
+data_dir: data/original
+output_dir: outputs/original
+data_csv: Data/Dataset.csv
+feat_csv: Code/Dataset_feature.csv
+
+# ── 모델 ──────────────────────────────────────────────────────────────────────
+k: 32
+d_model: 64
+num_heads: 4
+dropout: 0.3
+maccs_dim: 167
+max_atoms: 100
+sage_layers: 2
+sage_hidden: 64
+atom_feat_dim: 43
+
+# ── 학습 ──────────────────────────────────────────────────────────────────────
+batch_size: 16
+max_length: 256
+seed: 42
+epochs: 200
+patience: 30
+lr_chem: 0.0001
+lr_other: 0.0003
+weight_decay: 0.0001
+sched_patience: 8
+sched_factor: 0.5
+sched_min_lr: 0.00001
