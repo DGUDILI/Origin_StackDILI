@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# run.sh — DGUDILI_2026 (Residual/MHA 버전) 파이프라인 실행
+# run.sh — DGUDILI_2026 파이프라인 실행
+# env1/env2: E2E_FTV6StyleEncoder (ChemBERTa+FP Cross-Attention)
+# graph:     GraphMACCSEncoder (GraphSAGE+MACCS Differential Cross-Attention)
 set -e
 
 IMAGE="dgudili:latest"
@@ -29,7 +31,7 @@ run_step() {
     echo "──────────────────────────────────────────────────────────"
     echo "[run.sh] $script${tag}"
     echo "──────────────────────────────────────────────────────────"
-    docker run --rm \
+    MSYS_NO_PATHCONV=1 docker run --rm \
         -v "${HOST_DIR}:/workspace" \
         -e STACKDILI_ROOT=/workspace \
         -e USE_CLEAN_DATA="$clean" \
@@ -49,7 +51,7 @@ run_root() {
     echo "──────────────────────────────────────────────────────────"
     echo "[run.sh] $script${tag}"
     echo "──────────────────────────────────────────────────────────"
-    docker run --rm \
+    MSYS_NO_PATHCONV=1 docker run --rm \
         -v "${HOST_DIR}:/workspace" \
         -e USE_CLEAN_DATA="$clean" \
         -e PYTHONUNBUFFERED=1 \
@@ -99,9 +101,36 @@ case "$CMD" in
     step2) run_step "Step2_pretrain.py"   ;;
     step3) run_step "Step3_stacking.py"   ;;
 
+    # ── GraphMACCSEncoder 파이프라인 ─────────────────────────────────────────────
+    run-graph)
+        echo "[run.sh] GraphMACCSEncoder: fixed split, original data"
+        run_step "Step1_preprocess.py"
+        run_step "Step2_pretrain_graph.py"
+        run_step "Step3_stacking.py"
+        echo ""
+        echo "[run.sh] Done."
+        ;;
+
+
+    step4)
+        SMILES="${2:-CC(=O)Oc1ccccc1C(=O)O}"
+        echo ""
+        echo "──────────────────────────────────────────────────────────"
+        echo "[run.sh] Step4_xai.py  SMILES=${SMILES}"
+        echo "──────────────────────────────────────────────────────────"
+        MSYS_NO_PATHCONV=1 docker run --rm \
+            -v "${HOST_DIR}:/workspace" \
+            -e STACKDILI_ROOT=/workspace \
+            -e PYTHONUNBUFFERED=1 \
+            -e KMP_DUPLICATE_LIB_OK=TRUE \
+            -w /workspace/DGUDILI_2026 \
+            "$IMAGE" \
+            python "src/Step4_xai.py" --smiles "$SMILES"
+        ;;
+
     shell)
         echo "[run.sh] 컨테이너 bash 진입..."
-        docker run --rm -it \
+        MSYS_NO_PATHCONV=1 docker run --rm -it \
             -v "${HOST_DIR}:/workspace" \
             -e STACKDILI_ROOT=/workspace \
             -e PYTHONUNBUFFERED=1 \
@@ -120,10 +149,13 @@ case "$CMD" in
         echo "  run-clean          — env1: fixed split, clean data"
         echo "  run-clean env2     — env2: 10-Fold CV, clean data"
         echo ""
-        echo "  step1              — Step1: FP 전처리 (original)"
-        echo "  step2              — Step2: E2E_MHAResidualEncoder 학습"
+        echo "  step1              — Step1: FP/MACCS/Graph 전처리"
+        echo "  step2              — Step2: GraphMACCSEncoder 학습"
         echo "  step3              — Step3: Feature 추출 + Stacking + 평가"
         echo "  shell              — 컨테이너 bash 진입"
+        echo ""
+        echo "  run-graph          — GraphMACCSEncoder 전체 파이프라인 (fixed split)"
+        echo "  step4 [SMILES]     — Step4: XAI 히트맵 시각화 (기본: 아스피린)"
         exit 1
         ;;
 esac

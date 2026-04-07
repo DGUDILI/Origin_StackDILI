@@ -5,9 +5,11 @@
 ```bash
 cd Origin_StackDILI
 
-# 최초 1회 빌드
+# 최초 1회 빌드 (torch-geometric, einops 포함)
 bash run.sh build
 ```
+
+### E2E_FTV6StyleEncoder (ChemBERTa + FP Cross-Attention)
 
 | 명령어 | 설명 |
 |---|---|
@@ -16,8 +18,18 @@ bash run.sh build
 | `bash run.sh run env2` | env2 — 원본 데이터, 10-fold CV |
 | `bash run.sh run-clean env2` | env2 — clean 데이터, 10-fold CV |
 
-> env2는 env1 실행 후 사용 가능 (encoder 파일 필요)  
-> 일단 bash로 적어두긴 했는데.... WSL에서 ./run.sh 실행해도 되고... Git Bash 켜고 ./run.sh로 써도 됨!!!
+> env2는 env1 실행 후 사용 가능 (encoder 파일 필요)
+
+### GraphMACCSEncoder (GraphSAGE + MACCS Differential Cross-Attention)
+
+| 명령어 | 설명 |
+|---|---|
+| `bash run.sh run-graph` | fixed split, 원본 데이터 전체 파이프라인 |
+| `bash run.sh step2` | GraphMACCSEncoder 학습만 |
+| `bash run.sh step4` | XAI 히트맵 — 아스피린 (기본값) |
+| `bash run.sh step4 "CC(=O)O"` | XAI 히트맵 — 지정 SMILES |
+
+> WSL에서 ./run.sh 실행해도 되고... Git Bash 켜고 ./run.sh로 써도 됨!!!
 
 ---
 

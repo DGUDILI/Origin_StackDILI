@@ -14,9 +14,11 @@ from utils import load_dataset
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 1-A: 기존 FP 전처리 (E2E_FTV6StyleEncoder / E2E_MHAResidualEncoder 용)
+# ─────────────────────────────────────────────────────────────────────────────
 print("=" * 60)
-print("Step 1: FP Preprocessing (StandardScaler)")
-print("  LinearProjection은 model 내부에서 학습 (fp_proj)")
+print("Step 1-A: FP Preprocessing (StandardScaler, 기존 모델용)")
 print("=" * 60)
 
 smiles_all, X_fp_all, y_all, ref_all, feat_cols = load_dataset(DATA_PATH, FEAT_PATH)
@@ -30,13 +32,11 @@ print(f"FP: {fp_dim}-dim  |  Train: {train_mask.sum()}  |  Test: {test_mask.sum(
 print(f"Train labels: pos={int(y_tr.sum())}, neg={int((1-y_tr).sum())}")
 print(f"Test  labels: pos={int(y_te.sum())}, neg={int((1-y_te).sum())}")
 
-# FP StandardScaler (SelectKBest 없음 — 모델 내 fp_proj가 중요도 학습)
 scaler_fp  = StandardScaler()
 X_fp_train = scaler_fp.fit_transform(X_fp_all[train_mask]).astype(np.float32)
 X_fp_test  = scaler_fp.transform(X_fp_all[test_mask]).astype(np.float32)
 print(f"\nFP shape: train={X_fp_train.shape}, test={X_fp_test.shape}")
 
-# 저장
 np.save(os.path.join(DATA_DIR, "fp_full_train.npy"), X_fp_train)
 np.save(os.path.join(DATA_DIR, "fp_full_test.npy"),  X_fp_test)
 np.save(os.path.join(DATA_DIR, "y_train.npy"), y_tr)
@@ -50,7 +50,6 @@ with open(os.path.join(DATA_DIR, "scalers.pkl"), "wb") as f:
 with open(os.path.join(DATA_DIR, "fp_feature_names.json"), "w") as f:
     json.dump(feat_cols, f, indent=2)
 
-# 검증
 for name, exp in [
     ("fp_full_train.npy", (train_mask.sum(), fp_dim)),
     ("fp_full_test.npy",  (test_mask.sum(),  fp_dim)),
@@ -58,5 +57,51 @@ for name, exp in [
     arr = np.load(os.path.join(DATA_DIR, name))
     assert arr.shape == exp and not np.isnan(arr).any(), f"Verify failed: {name}"
 
-print(f"\nSaved: fp_full_train/test.npy, smiles_train/test.npy, y_train/test.npy, scalers.pkl, fp_feature_names.json")
-print("Step 1 OK")
+print(f"Saved: fp_full_train/test.npy, smiles_train/test.npy, y_train/test.npy, scalers.pkl")
+print("Step 1-A OK\n")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 1-B: GraphMACCSEncoder 전용 — MACCS + PyG 그래프 캐시 저장
+#   Windows CPU 병목 해소: DataLoader num_workers=0 권장 환경에서
+#   on-the-fly RDKit 변환 대신 미리 .pt 파일로 저장
+# ─────────────────────────────────────────────────────────────────────────────
+print("=" * 60)
+print("Step 1-B: Graph + MACCS 캐시 저장 (GraphMACCSEncoder용)")
+print("  SMILES → PyG Data + MACCS 167-bit → .pt")
+print("=" * 60)
+
+import torch
+from graph_utils import smiles_to_pyg, get_maccs, verify_maccs_mapping
+
+verify_maccs_mapping()
+
+def _build_graph_cache(smiles_list, labels, split_name: str):
+    data_list = []
+    skip = 0
+    for smi, label in zip(smiles_list, labels):
+        pyg = smiles_to_pyg(smi)
+        if pyg is None:
+            print(f"  [WARN] 파싱 실패 — SMILES: {smi[:40]}...")
+            skip += 1
+            continue
+        maccs = get_maccs(smi)
+        data_list.append({
+            "pyg":   pyg,
+            "maccs": maccs,                         # (167,) float32
+            "label": torch.tensor(label, dtype=torch.float32),
+            "smiles": smi,
+        })
+    path = os.path.join(DATA_DIR, f"{split_name}_graphs.pt")
+    torch.save(data_list, path)
+    print(f"  [{split_name}] {len(data_list)}개 저장 → {path}  (skip={skip})")
+    return len(data_list)
+
+smiles_tr = smiles_all[train_mask]
+smiles_te = smiles_all[test_mask]
+
+n_tr = _build_graph_cache(smiles_tr, y_tr, "train")
+n_te = _build_graph_cache(smiles_te, y_te, "test")
+
+print(f"\nGraph cache: train={n_tr}, test={n_te}")
+print("Step 1-B OK")
+print("\nStep 1 전체 완료")

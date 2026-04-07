@@ -1,7 +1,7 @@
 import os
 
 # ── 모델 하이퍼파라미터 ──────────────────────────────────────────────────────────
-K          = 16       # encode() 출력 차원 (Stacking 입력)
+K          = 32       # encode() 출력 차원 (Stacking 입력, 16→32: 표현력 확장)
 D_MODEL    = 64       # MHA 내부 차원 (실험 결과: d=64가 최적, d=128 이상은 FP proj 과적합)
 NUM_HEADS  = 4        # MHA 헤드 수 (d_model % num_heads == 0 조건)
 DROPOUT    = 0.3
@@ -23,6 +23,13 @@ WEIGHT_DECAY   = 1e-4
 SCHED_PATIENCE = 8
 SCHED_FACTOR   = 0.5
 SCHED_MIN_LR   = 1e-5
+
+# ── GraphMACCSEncoder 전용 하이퍼파라미터 ────────────────────────────────────
+MACCS_DIM      = 167    # RDKit MACCSkeys 벡터 길이 (bit 0 미사용, bits 1~166 유효)
+MAX_ATOMS      = 100    # to_dense_batch 패딩 기준 (분자당 최대 원자 수)
+SAGE_LAYERS    = 2      # GraphSAGE layer 수
+SAGE_HIDDEN    = 64     # SAGEConv hidden dim (16→64: 43-dim atom feature 병목 해소)
+ATOM_FEAT_DIM  = 43     # get_atom_features() 출력 차원 (graph_utils.py 기준)
 
 # ── 경로 ─────────────────────────────────────────────────────────────────────────
 ROOT             = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

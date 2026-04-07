@@ -19,7 +19,13 @@ RUN pip install --no-cache-dir \
     transformers \
     matplotlib \
     seaborn \
-    rdkit
+    rdkit \
+    einops
+
+# torch-geometric (CPU 전용, torch 버전에 맞춰 설치)
+RUN pip install --no-cache-dir \
+    torch-scatter torch-sparse torch-geometric \
+    -f https://data.pyg.org/whl/torch-2.6.0+cpu.html
 
 # ChemBERTa 모델 이미지 레이어에 캐싱 (첫 실행 속도 개선)
 RUN python -c "from transformers import AutoTokenizer, AutoModel; \

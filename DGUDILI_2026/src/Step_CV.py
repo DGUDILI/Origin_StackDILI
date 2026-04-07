@@ -32,26 +32,64 @@ from xgboost import XGBClassifier
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SRC_DIR)
+from torch_geometric.data import Batch as PyGBatch
 from config import (
     K, D_MODEL, NUM_HEADS, MODEL_NAME,
     BATCH_SIZE, MAX_LENGTH, SEED,
     DATA_DIR, OUT_DIR,
     DATA_PATH, FEAT_PATH, _USE_CLEAN,
+    MACCS_DIM, MAX_ATOMS, SAGE_LAYERS, SAGE_HIDDEN, ATOM_FEAT_DIM,
 )
-from utils import set_seed, load_dataset, SMILESDataset
-from model import E2E_MHAResidualEncoder
+from utils import set_seed
+from model import GraphMACCSEncoder
 
 N_FOLDS = 10
 
 
-def extract_features(model, smiles_list, fp_scaled, tokenizer, device):
-    ds = SMILESDataset(smiles_list, fp_scaled, tokenizer, MAX_LENGTH)
-    dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+def _collate(batch):
+    return {
+        "input_ids": torch.stack([b["input_ids"] for b in batch]),
+        "attn_mask": torch.stack([b["attn_mask"] for b in batch]),
+        "maccs":     torch.stack([b["maccs"] for b in batch]),
+        "graph":     PyGBatch.from_data_list([b["pyg_data"] for b in batch]),
+    }
+
+
+def extract_features(model, data_list, tokenizer, device):
+    smiles_list = [d["smiles"] for d in data_list]
+    enc = tokenizer(
+        smiles_list,
+        max_length=MAX_LENGTH,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    class _DS(torch.utils.data.Dataset):
+        def __init__(self, data, enc):
+            self.data = data
+            self.ids  = enc["input_ids"]
+            self.mask = enc["attention_mask"]
+        def __len__(self): return len(self.data)
+        def __getitem__(self, i):
+            return {
+                "input_ids": self.ids[i],
+                "attn_mask": self.mask[i],
+                "maccs":     self.data[i]["maccs"],
+                "pyg_data":  self.data[i]["pyg"],
+            }
+
+    dl = DataLoader(_DS(data_list, enc), batch_size=BATCH_SIZE,
+                    shuffle=False, num_workers=0, collate_fn=_collate)
     feats = []
     with torch.no_grad():
-        for ids, mask, fp in dl:
-            ids, mask, fp = ids.to(device), mask.to(device), fp.to(device)
-            feats.append(model.encode(ids, mask, fp).cpu().numpy())
+        for batch in dl:
+            feats.append(model.encode(
+                batch["input_ids"].to(device),
+                batch["attn_mask"].to(device),
+                batch["maccs"].to(device),
+                batch["graph"].to(device),
+            ).cpu().numpy())
     return np.concatenate(feats, axis=0)
 
 
@@ -61,38 +99,45 @@ if __name__ == "__main__":
     label = "CLEAN" if _USE_CLEAN else "ORIGINAL"
     print("=" * 65)
     print(f"Step CV: DGUDILI 2026  10-Fold CV  ({label} data)")
-    print(f"  Encoder: E2E_MHAResidualEncoder  |  k={K}  |  d_model={D_MODEL}")
+    print(f"  Encoder: GraphMACCSEncoder  |  k={K}  |  d_model={D_MODEL}")
     print("=" * 65)
 
-    # ── 데이터 로드 ────────────────────────────────────────────────────────────
-    for p in [DATA_PATH, FEAT_PATH]:
-        assert os.path.exists(p), f"Missing: {p}"
+    # ── 데이터 로드 (graph 캐시 사용) ─────────────────────────────────────────
+    train_cache = os.path.join(DATA_DIR, "train_graphs.pt")
+    test_cache  = os.path.join(DATA_DIR, "test_graphs.pt")
+    for p in [train_cache, test_cache]:
+        assert os.path.exists(p), f"Missing: {p}\nRun Step1 first."
 
-    smiles_all, X_fp_all, y_all, ref_all, _ = load_dataset(DATA_PATH, FEAT_PATH)
-    from sklearn.preprocessing import StandardScaler
-    scaler_fp = StandardScaler()
-    scaler_fp.fit(X_fp_all[ref_all != "DILIrank"])  # train 기준 fit
-    X_fp_scaled = scaler_fp.transform(X_fp_all).astype(np.float32)
+    train_data = torch.load(train_cache, weights_only=False)
+    test_data  = torch.load(test_cache,  weights_only=False)
+    all_data   = train_data + test_data
+    y_all      = np.array([d["label"].item() for d in all_data])
+    print(f"Total: {len(all_data)}  (train={len(train_data)}, test={len(test_data)})")
 
-    print(f"Total: {len(y_all)}  |  FP: {X_fp_all.shape[1]}-dim")
-
-    # ── encoder 로드 ───────────────────────────────────────────────────────────
-    enc_path = os.path.join(OUT_DIR, "pretrained_encoder.pt")
-    assert os.path.exists(enc_path), f"Missing: {enc_path}\nRun Step2 first."
+    # ── encoder 로드 ──────────────────────────────────────────────────────────
+    enc_path = os.path.join(OUT_DIR, "pretrained_graph_encoder.pt")
+    assert os.path.exists(enc_path), f"Missing: {enc_path}\nRun step2-graph first."
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    encoder   = E2E_MHAResidualEncoder(
-        fp_in_dim=X_fp_all.shape[1], k=K, d_model=D_MODEL,
-        num_heads=NUM_HEADS, model_name=MODEL_NAME,
+    encoder   = GraphMACCSEncoder(
+        model_name=MODEL_NAME,
+        atom_feat_dim=ATOM_FEAT_DIM,
+        sage_hidden=SAGE_HIDDEN,
+        sage_layers=SAGE_LAYERS,
+        maccs_dim=MACCS_DIM,
+        d_model=D_MODEL,
+        num_heads=NUM_HEADS,
+        k=K,
+        max_atoms=MAX_ATOMS,
     ).to(device)
     encoder.load_state_dict(torch.load(enc_path, map_location=device))
     encoder.eval()
     print(f"Encoder loaded ({device})")
 
-    # ── 전체 데이터 feature 추출 ────────────────────────────────────────────────
-    print(f"\nExtracting features for all {len(y_all)} samples...")
-    X_feat = extract_features(encoder, smiles_all, X_fp_scaled, tokenizer, device)
+    # ── 전체 데이터 feature 추출 ──────────────────────────────────────────────
+    print(f"\nExtracting features for all {len(all_data)} samples...")
+    X_feat = extract_features(encoder, all_data, tokenizer, device)
     print(f"Feature shape: {X_feat.shape}")
 
     # ── 10-Fold CV ────────────────────────────────────────────────────────────
