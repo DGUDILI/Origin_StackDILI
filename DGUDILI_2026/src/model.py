@@ -297,7 +297,7 @@ class GraphMACCSEncoder(nn.Module):
 
         # ── MACCS Identity Embedding ───────────────────────────────────────────
         # bit 인덱스(0~166) → d_model-dim 학습 벡터
-        # binary mask 곱으로 inactive key(=0) 소거
+        # inactive key는 attention score 단계에서 -1e9 마스킹으로 처리 (diff_attn kv_padding_mask)
         self.maccs_emb = nn.Embedding(maccs_dim, d_model)
         nn.init.normal_(self.maccs_emb.weight, std=0.02)
 

@@ -1,151 +1,107 @@
-# DGUDILI_2026 아키텍처 문서
+# DGUDILI_2026 — GraphMACCSEncoder 아키텍처
 
 ## 목표
 
-SMILES 문자열과 분자 지문(Fingerprint)을 융합하여 DILI(Drug-Induced Liver Injury) 발생 여부를 이진 분류.
+SMILES 문자열로부터 세 가지 표현(그래프 구조, MACCS 지문, 언어 임베딩)을 융합하여 DILI 이진 분류.
 
 ---
 
-## 파이프라인 개요
+## 전체 파이프라인
 
 ```
-Step 1: FP 전처리 (StandardScaler)
-Step 2: E2E_FTV6StyleEncoder 학습 (Stage 1)
-Step 3: Feature 추출 + Stacking OOF (Stage 2)
+Step 1-A: FP 전처리 (StandardScaler, 425-dim)
+Step 1-B: PyG 그래프 + MACCS 캐시 저장 (.pt)
+Step 2:   GraphMACCSEncoder 학습 (Stage 1, val_AUC early stop)
+Step 3:   Feature 추출 + Stacking OOF (Stage 2)
 ```
 
 ```
-[SMILES]  [Fingerprint 425-dim]
-   │              │
-   ▼              ▼
-[Stage 1: E2E_FTV6StyleEncoder 학습]
-   │
-   ▼
-[16-dim Fused Feature 추출]
-   │
-   ▼
-[Stage 2: Stacking OOF → LR Meta → 최종 예측]
+[SMILES]
+   ├─────────────────────────────────────────────────────────┐
+   │  ChemBERTa-77M-MLM                                      │
+   │  (마지막 레이어 unfreeze, lr=1e-4)                       │
+   │  → CLS (B, 384) → LN → Linear(384, 64) → chem_feat      │
+   │                                           (B, 64)       │
+   ├─────────────────────────────────────────────────────────┤
+   │  RDKit mol → 43-dim atom features                       │
+   │  → atom_proj Linear(43, 64)                             │
+   │  → SAGEConv(64, 64) × 2 + BatchNorm + ReLU             │
+   │  → to_dense_batch → (B, 100, 64) + pad_mask            │
+   │  → node_proj Linear(64, 64)  → node_q (B, 100, 64)     │
+   ├─────────────────────────────────────────────────────────┤
+   │  MACCSkeys (B, 167) binary                              │
+   │  → Embedding(167, 64)[idx]  → maccs_kv (B, 167, 64)    │
+   │    inactive bits → kv_padding_mask (-1e9 in scores)     │
+   └────────────────────────┬────────────────────────────────┘
+                            ▼
+         DifferentialCrossAttention
+         ─────────────────────────────────────────────────────
+         Q  = node_q    (B, 100, 64)   ← atom node embeddings
+         KV = maccs_kv  (B, 167, 64)   ← MACCS key embeddings
+
+         W_q: (B, 100, 128) → Q1, Q2  [h=4, d_head=16]
+         W_k: (B, 167, 128) → K1, K2
+         W_v: (B, 167, 64)  → V
+
+         scores1 = Q1 @ K1^T / √16    (B, 4, 100, 167)
+         scores2 = Q2 @ K2^T / √16
+         [inactive bits masked -1e9]
+
+         λ = exp(λ_q1·λ_k1) - exp(λ_q2·λ_k2) + 0.8
+         λ.clamp(min=1e-4)              ← 음수화 방지
+
+         a1 = softmax(scores1)
+         a2 = softmax(scores2)
+         scores = a1 - λ·a2            ← Differential attention
+         out = scores @ V              (B, 4, 100, 16)
+         GroupNorm → W_o               (B, 100, 64)
+         ─────────────────────────────────────────────────────
+                            │
+                            ▼
+         masked_mean_pool (pad_mask 기반)
+         → graph_feat (B, 64)
+                            │
+                            ▼
+         concat([chem_feat, graph_feat])  (B, 128)
+         → fuse_proj Linear(128, 64) → LayerNorm
+         → MLP: LN → Linear(64, 32) → GELU → Dropout(0.3)
+         → encode_out (B, 32)
+                            │
+                   ┌────────┴────────┐
+             Stage 1             Stage 2
+          Linear(32, 1)      encode() → (B, 32)
+          BCEWithLogitsLoss      Stacking OOF
 ```
 
 ---
 
-## Stage 1: E2E_FTV6StyleEncoder
-
-### 전체 구조도
-
-```
-SMILES 문자열
-    │
-    ▼
-┌──────────────────────────────────────────────────────┐
-│  ChemBERTa-77M-MLM  (DeepChem/ChemBERTa-77M-MLM)     │
-│                                                      │
-│  Tokenizer → [CLS, tok1, tok2, ..., SEP] (max 256)   │
-│                                                      │
-│  ┌─────────────────────────────────────────────┐     │
-│  │ Embedding Layer            [Frozen]         │     │
-│  └──────────────────────┬──────────────────────┘     │
-│                         ▼                            │
-│  ┌──────────────────────────────────────────────┐    │
-│  │ Encoder Layer[0]           [Frozen]          │    │
-│  └──────────────────────┬───────────────────────┘    │
-│                         ▼                            │
-│  ┌──────────────────────────────────────────────┐    │
-│  │ Encoder Layer[1]           [Frozen]          │    │
-│  └──────────────────────┬───────────────────────┘    │
-│                         ▼                            │
-│  ┌──────────────────────────────────────────────┐    │
-│  │ Encoder Layer[2]  ← [Unfrozen, lr=1e-4]      │    │
-│  └──────────────────────┬───────────────────────┘    │
-│                         ▼                            │
-│            CLS token hidden state                    │
-│                   (B, 384)                           │
-└─────────────────────────┬────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │  chem_proj            │
-              │  LayerNorm(384)       │
-              │  Linear(384 → 128)    │
-              │  GELU                 │
-              │  Dropout(0.3)         │
-              │  Linear(128 → 16)     │
-              └───────────┬───────────┘
-                          │
-                          ▼
-                     q : (B, 16)          ← Query 토큰
-                          │
-                          ▼
-              W_Q: Linear(1 → 32)
-                          │
-                          ▼
-                    Q : (B, 16, 32)
-```
-
-```
-분자 지문 FP (425-dim)
-    │
-    ▼
-┌──────────────────────┐
-│  fp_proj             │
-│  Linear(425 → 16)    │
-│  LayerNorm(16)       │
-└──────────┬───────────┘
-           │
-           ▼
-      kv : (B, 16)       ← Key/Value 토큰
-           │
-      ┌────┴────┐
-      ▼         ▼
-W_K: Linear   W_V: Linear
-  (1 → 32)     (1 → 1)
-      │              │
-      ▼              ▼
-K : (B, 16, 32)   V : (B, 16, 1)
-```
-
-```
-Cross-Attention Fusion
-─────────────────────────────────────────────────
-Q : (B, 16, 32)   K : (B, 16, 32)   V : (B, 16, 1)
-
-scores  = Q @ K^T / √32         → (B, 16, 16)
-weights = softmax(scores, dim=-1) → (B, 16, 16)
-attn    = weights @ V            → (B, 16, 1)
-
-flatten → (B, 16)    [k=16 × d_v=1]
-─────────────────────────────────────────────────
-
-Stage 1 학습:
-  head: Linear(16 → 1) → BCEWithLogitsLoss
-
-Stage 2 추출:
-  encode() → (B, 16) fused feature vector
-```
+## Stage 1: GraphMACCSEncoder 학습
 
 ### 텐서 플로우 요약
 
-| 단계 | 입력 shape | 출력 shape | 설명 |
+| 단계 | 입력 shape | 출력 shape | 모듈 |
 |------|-----------|-----------|------|
-| Tokenize | SMILES str | (B, 256) | max_length=256, padding |
-| ChemBERTa | (B, 256) | (B, 384) | CLS token 추출 |
-| chem_proj | (B, 384) | (B, 16) | Query 토큰 생성 |
-| fp_proj | (B, 425) | (B, 16) | Key/Value 토큰 생성 |
-| W_Q | (B, 16, 1) | (B, 16, 32) | Query 행렬 |
-| W_K | (B, 16, 1) | (B, 16, 32) | Key 행렬 |
-| W_V | (B, 16, 1) | (B, 16, 1) | Value 행렬 (d_v=1) |
-| Cross-Attn | Q,K,V | (B, 16, 1) | Attention 가중합 |
-| Flatten | (B, 16, 1) | (B, 16) | 융합 피처 벡터 |
-| head | (B, 16) | (B, 1) | Stage 1 예측값 |
+| ChemBERTa | (B, 256) token ids | (B, 384) | AutoModel CLS |
+| chem_proj | (B, 384) | (B, 64) | LN → Linear |
+| atom_proj | (N_total, 43) | (N_total, 64) | Linear |
+| SAGEConv×2 | (N_total, 64) | (N_total, 64) | SAGEConv + BN + ReLU |
+| to_dense_batch | (N_total, 64) | (B, 100, 64) | PyG dense pad |
+| node_proj | (B, 100, 64) | (B, 100, 64) | Linear → node_q |
+| MACCS embed | (B, 167) int | (B, 167, 64) | Embedding(167, 64) |
+| DiffAttn | Q(B,100,64) KV(B,167,64) | (B, 100, 64) | DifferentialCrossAttention |
+| masked_pool | (B, 100, 64) | (B, 64) | mean over valid atoms |
+| fuse_proj | (B, 128) | (B, 64) | Linear → LN |
+| MLP | (B, 64) | (B, 32) | LN → Linear → GELU → Drop |
+| head | (B, 32) | (B, 1) | Linear (Stage 1 only) |
 
-### 학습 설정 (Stage 1)
+### 학습 설정
 
 | 항목 | 값 |
 |------|---|
 | ChemBERTa | DeepChem/ChemBERTa-77M-MLM (hidden=384, layers=3) |
 | Frozen | embeddings + encoder.layer[0], [1] |
 | Unfrozen | encoder.layer[2] (마지막), lr=1e-4 |
-| CrossAttn/Proj lr | 3e-4 |
+| Graph/DiffAttn lr | 3e-4 |
 | Weight decay | 1e-4 |
 | Batch size | 16 |
 | Max epochs | 200 |
@@ -156,77 +112,60 @@ Stage 2 추출:
 
 ---
 
-## Stage 2: Stacking OOF → Logistic Regression
+## Stage 2: Stacking OOF → LR meta
 
 ```
-Train 전체 데이터 (1398 샘플)
+Train 전체 (1,398 샘플)
         │
         ▼
-[E2E_FTV6StyleEncoder.encode()]
+[GraphMACCSEncoder.encode()]  ← frozen (eval mode)
         │
         ▼
- 16-dim Fused Features
+ 32-dim Fused Features
         │
         ▼
-┌────────────────────────────────────────────────────────────┐
-│  5-Fold Stratified CV (OOF Stacking)                       │
-│                                                            │
-│  Base Models:                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ RF     : RandomForest(n_estimators=300)              │  │
-│  │ ET     : ExtraTrees(n_estimators=300)                │  │
-│  │ HistGB : HistGradientBoosting(max_iter=300)          │  │
-│  │ XGB    : XGBoost(n_est=300, lr=0.05, max_depth=4)    │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                            │
-│  OOF 결과: oof_probs  shape = (1398, 4)                    │
-│  Test 결과: test_probs shape = (452, 4)                    │
-└─────────────────────────────┬──────────────────────────────┘
-                              │
-                              ▼
-              ┌───────────────────────────────┐
-              │  Meta Model                   │
-              │  LogisticRegression(C=1.0)    │
-              │  fit(oof_probs, y_train)      │
-              │  predict_proba(test_probs)    │
-              └───────────────┬───────────────┘
-                              │
-                              ▼
-                  최종 예측 확률 (452,)
-                              │
-                              ▼
-                    threshold = 0.5 → 이진 분류
+┌──────────────────────────────────────────────────────────┐
+│  5-Fold Stratified OOF Stacking                          │
+│  RF / ET / HistGB / XGB (n_estimators=300)               │
+│  OOF probs: (1398, 4)   Test probs: (452, 4)             │
+└──────────────────────────┬───────────────────────────────┘
+                           ▼
+         LogisticRegression meta
+         fit(oof_probs, y_train)
+                           ▼
+         OOF MCC-optimal threshold (0.10~0.90 탐색)
+                           ▼
+              최종 예측 (DILIrank 452개)
 ```
 
 ---
 
-## FP Soft Projection의 의미
+## DifferentialCrossAttention 상세 (differential_attention.py)
 
-기존 접근(SelectKBest k=16)은 통계적 기준으로 16개 피처를 하드 선택하여 나머지 정보를 폐기.
-
-FTV6 방식은 `Linear(425, 16)` 가중치 행렬이 학습을 통해 중요도를 배우는 **Soft Projection**:
+논문 Differential Transformer (arxiv 2410.05258)의 cross-attention 변형.
 
 ```
-FP 425개 → W ∈ ℝ^{425×16} → 16개 토큰
-             ↑
-     각 토큰 = FP 전체의 가중합
-     (중요한 FP에 큰 가중치, 덜 중요한 FP에 작은 가중치)
+λ = exp(λ_q1·λ_k1) - exp(λ_q2·λ_k2) + λ_init(0.8)
+λ.clamp(min=1e-4)   ← 2026-04-08 추가: lam 음수 방지, gradient 유지
+
+scores = softmax(Q1@K1^T/√d) - λ · softmax(Q2@K2^T/√d)
+       = a1 - λ · a2
 ```
+
+- a1이 주목하는 MACCS key에서 a2가 공통으로 주목하는 "노이즈"를 차감
+- inactive MACCS bits: scores에 -1e9 마스킹 → attention ≈ 0
+- GroupNorm + (1 - λ_init) 스케일 보정으로 출력 안정화
+- attn_weights (head 평균) 저장 → Step4_xai.py에서 히트맵 생성
 
 ---
 
-## Cross-Attention의 역할
+## XAI: Step4_xai.py
 
-ChemBERTa(언어적 구조 정보)를 **Query**, 분자 지문(물리화학적 특성)을 **Key/Value**로 사용:
-
-```
-Query(ChemBERTa) → "이 분자의 구조적 특성에서 어떤 물리화학 피처가 중요한가?"
-Key/Value(FP)    → "DILI 예측에 관련된 물리화학적 신호를 제공"
-
-Attention weight (B, 16, 16):
-  rows = 16개의 ChemBERTa query 토큰
-  cols = 16개의 FP key 토큰
-  → 각 구조적 토큰이 어느 FP 정보에 주목할지 학습
+```python
+encoder.encode(...)          # 추론 실행
+attn = encoder.get_attn_weights()  # (1, MAX_ATOMS, 167)
+# torch.relu(attn)[:, 1:]    → (n_atoms, 166) 양수 differential score
+# seaborn heatmap: x=MACCS bits 1~166, y=원자 기호
 ```
 
 ---
@@ -236,4 +175,5 @@ Attention weight (B, 16, 16):
 | 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
 |------|-----|-----|----|-------------|-------------|
 | StackDILI (목표) | **0.9736** | **0.8304** | **0.9010** | **0.9402** | **0.8993** |
-| **DGUDILI_2026** | **0.9224** | **0.7270** | **0.8426** | 0.9022 | 0.8358 |
+| **GraphMACCSEncoder** | **0.9224** | **0.7270** | **0.8426** | 0.9022 | 0.8358 |
+| vs 목표 | -0.0512 | -0.1034 | -0.0584 | -0.0380 | -0.0635 |

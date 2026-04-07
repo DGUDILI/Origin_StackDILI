@@ -74,7 +74,7 @@ class DifferentialCrossAttention(nn.Module):
             torch.exp((self.lambda_q1 * self.lambda_k1).sum(-1))
             - torch.exp((self.lambda_q2 * self.lambda_k2).sum(-1))
             + self.lambda_init
-        )  # (num_heads,)
+        ).clamp(min=1e-4)  # (num_heads,) — 음수화 방지, gradient flow 유지
         return lam.view(1, self.num_heads, 1, 1)
 
     def forward(

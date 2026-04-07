@@ -10,32 +10,37 @@
 
 ## Project Context: DGUDILI_2026
 
-**Goal:** DILI(Drug-Induced Liver Injury) 예측 — ChemBERTa(E2E) + 분자 지문(FP) Cross-Attention 융합 모델
+**Goal:** DILI(Drug-Induced Liver Injury) 예측 — GraphSAGE + MACCS DifferentialCrossAttention + ChemBERTa 융합 모델
 
-**Current Pipeline:** E2E_FTV6StyleEncoder (d_v=1, val_AUC early stopping) + Stacking OOF (RF/ET/HistGB/XGB → LR meta)
+**Current Pipeline:** GraphMACCSEncoder (val_AUC early stopping) + Stacking OOF (RF/ET/HistGB/XGB → LR meta)
 
 **ChemBERTa 모델:** DeepChem/ChemBERTa-77M-MLM, hidden_dim=**384**, layers=**3**
-- "77M"은 MLM 사전학습 SMILES 토큰 수를 의미하며, 파라미터 수가 아님 (실제 ~3.5M)
-- E2E: ChemBERTa가 모델 내부에 내장 (SMILES를 실시간으로 처리, 사전 추출 불필요)
+- "77M"은 MLM 사전학습 SMILES 토큰 수이며, 파라미터 수가 아님 (실제 ~3.5M)
+- E2E: ChemBERTa가 모델 내부에 내장 (SMILES 실시간 처리)
 
 ## Pipeline Structure
 
 ```
 src/
-  model.py           — E2E_FTV6StyleEncoder 단일 모델
-  Step1_preprocess.py — FP StandardScaler 전처리 → data/ 저장
-  Step2_pretrain.py  — E2E 학습 (Stage 1) → outputs/pretrained_encoder.pt
-  Step3_stacking.py  — Feature 추출 + Stacking OOF (Stage 2) → outputs/results.csv
+  model.py                  — E2E_FTV6StyleEncoder, E2E_MHAResidualEncoder, GraphMACCSEncoder
+  graph_utils.py            — smiles_to_pyg, get_maccs (RDKit 기반)
+  differential_attention.py — DifferentialCrossAttention (arxiv 2410.05258 cross-attn 변형)
+  Step1_preprocess.py       — 1-A: FP StandardScaler / 1-B: Graph+MACCS .pt 캐시
+  Step2_pretrain.py         — GraphMACCSEncoder 학습 → outputs/pretrained_graph_encoder.pt
+  Step3_stacking.py         — Feature 추출 + Stacking OOF → outputs/results.csv
+  Step4_xai.py              — DiffAttn XAI 히트맵 (원자-MACCS key 상관관계)
+  Step_CV.py                — 10-Fold CV (env2)
+  config.py                 — 하이퍼파라미터 및 경로
 
 data/
-  fp_full_train/test.npy   — 전체 FP (425-dim), StandardScaler 적용
-  y_train/test.npy         — 레이블
-  scalers.pkl              — FP scaler 저장
-  fp_feature_names.json    — FP 피처 이름
+  train_graphs.pt / test_graphs.pt  — PyG 그래프 + MACCS (167-bit) 캐시
+  fp_full_train/test.npy            — FP (425-dim), StandardScaler 적용
+  y_train/test.npy                  — 레이블
+  scalers.pkl                       — FP scaler
 
 outputs/
-  pretrained_encoder.pt    — Step2 학습된 encoder 가중치
-  results.csv              — 최종 평가 결과
+  pretrained_graph_encoder.pt  — Step2 학습된 GraphMACCSEncoder 가중치
+  results.csv                  — 최종 평가 결과
 ```
 
 ## Experiment Results (DILIrank test, N=452)
@@ -59,18 +64,29 @@ outputs/
 
 ## Model Details
 
-**E2E_FTV6StyleEncoder (model.py):**
-- SMILES → ChemBERTa(layer[2] unfreeze, lr=1e-4) → CLS (B, 384) → chem_proj → (B, 16)
-- FP 425-dim → fp_proj: Linear(425,16)+LayerNorm → (B, 16)
-- Cross-Attention: Q(ChemBERTa) × K/V(FP) → (B, 16, 1) → flatten → (B, 16)
-- Stage 1: head Linear(16,1) + BCEWithLogitsLoss
-- Stage 2: encode() → (B, 16) fused feature → Stacking OOF
+**GraphMACCSEncoder (model.py):**
+- SMILES → ChemBERTa(last layer unfreeze, lr=1e-4) → CLS (B, 384) → LayerNorm → Linear → chem_feat (B, d_model)
+- SMILES → RDKit mol → 43-dim atom features → atom_proj → SAGEConv×2 (sage_hidden=64) → to_dense_batch → node_q (B, MAX_ATOMS, d_model)
+- SMILES → MACCSkeys (B, 167) → Embedding(167, d_model) → maccs_kv (B, 167, d_model); inactive bits masked -1e9
+- DifferentialCrossAttention(Q=node_q, K/V=maccs_kv) → attn_out (B, MAX_ATOMS, d_model)
+- masked_mean_pool → graph_feat (B, d_model) → concat([chem_feat, graph_feat]) → fuse_proj → MLP → encode_out (B, k=32)
+- Stage 1: head Linear(32, 1) + BCEWithLogitsLoss
+- Stage 2: encode() → (B, 32) fused feature → Stacking OOF
 
 **Step2_pretrain.py:**
 - Train 85% / Val 15% stratified split
 - Early stopping: val_AUC (mode=max, patience=30)
 - Scheduler: ReduceLROnPlateau(val_AUC, mode=max, factor=0.5, patience=8)
 - Seed 완전 고정: random, numpy, torch, cuda, cudnn
+
+**Key Hyperparameters (config.py):**
+- K=32, D_MODEL=64, NUM_HEADS=4, DROPOUT=0.3
+- SAGE_HIDDEN=64, SAGE_LAYERS=2, MAX_ATOMS=100, MACCS_DIM=167, ATOM_FEAT_DIM=43
+
+## Recent Changes (2026-04-08)
+
+- `model.py:300` — MACCS Embedding 주석 수정: "binary mask 곱" → "-1e9 마스킹" (실제 동작과 일치)
+- `differential_attention.py:77` — lambda `.clamp(min=1e-4)` 추가: lam < 0 방지, gradient flow 유지
 
 ## Next Steps
 

@@ -3,6 +3,19 @@
 > **분석 일시:** 2026-04-02  
 > **대상 경로:** `C:\DGUDILI\` (Origin_StackDILI / DGUDILI_2026)
 
+> **[2026-04-08 현황 업데이트]**
+> 이 보고서는 초기 CrossAttentionEncoder(AUC 0.7313) 단계의 분석입니다.
+> 지적된 주요 문제들은 이후 모두 해결되었습니다:
+> - 🔴 문제 1 (Early stopping leakage) → **해결**: val_AUC(mode=max) 기반 조기종료 적용
+> - 🔴 문제 2 (모델 용량 부족) → **해결**: GraphMACCSEncoder (GraphSAGE + DiffAttn) 도입
+> - 🟠 문제 3 (SelectKBest 비대칭) → **해결**: E2E 구조로 FP/SMILES 일체 처리
+> - 🟠 문제 4 (선형 분류기) → **해결**: Stacking OOF (RF/ET/HistGB/XGB + LR meta) 적용
+> - 🟡 문제 7 (재현성) → **해결**: set_seed() 완전 고정 (random/numpy/torch/cuda/cudnn)
+> - 🟡 문제 6 (CV 미적용) → **해결**: Step_CV.py (10-Fold CV) 추가
+>
+> **현재 성능 (GraphMACCSEncoder):** AUC 0.9224, MCC 0.7270, F1 0.8426
+> **잔여 목표:** StackDILI 대비 AUC -0.051 gap → P3 Domain Adversarial Training으로 대응 예정
+
 ---
 
 ## 1. 프로젝트 구조 개요

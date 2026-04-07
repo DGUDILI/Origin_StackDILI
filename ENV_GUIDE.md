@@ -1,23 +1,23 @@
 # DGUDILI 2026 — 환경 구성 및 실행 가이드
 
-> 현재 브랜치: `env-new`  
-> 모델: **E2E_MHAResidualEncoder** (ChemBERTa + MHA Residual Fusion)
+> 모델: **GraphMACCSEncoder** (GraphSAGE + MACCS DifferentialCrossAttention + ChemBERTa)
 
 ---
 
 ## 모델 구조
 
 ```
-FP 425-dim ──────────────────────────────────────────────→ (B, 425)
-ChemBERTa-77M-MLM (last-layer fine-tune) → 384-dim ──────→ (B, 384)
+SMILES
+  ├─→ ChemBERTa-77M-MLM (last-layer fine-tune) → CLS (B, 384) → chem_feat (B, 64)
+  ├─→ RDKit mol → atom_features (43-dim) → SAGEConv×2 (hidden=64)
+  │   → to_dense_batch → node_q (B, 100, 64)
+  └─→ MACCSkeys (B, 167) → Embedding(167, 64) → maccs_kv (B, 167, 64)
                         ↓
-      E2E_MHAResidualEncoder
-      · FP Projection: 425 → d_model(64)
-      · MHA: Q/K/V from [FP_proj || CLS], d_model=64, heads=4
-      · Residual + LayerNorm
-      · Final Projection → k=16-dim
+      DifferentialCrossAttention (Q=node_q, K/V=maccs_kv)
+      inactive bits masked -1e9 | λ.clamp(min=1e-4)
                         ↓
-          16-dim Feature Space
+      masked_mean_pool → graph_feat (B, 64)
+      concat([chem_feat, graph_feat]) → fuse_proj → MLP → 32-dim
                         ↓
   Stacking: RF / ET / HistGB / XGB (5-fold OOF) + LR meta
                         ↓
@@ -45,13 +45,16 @@ Origin_StackDILI/
 │
 └── DGUDILI_2026/
     ├── src/
-    │   ├── config.py            # 하이퍼파라미터 및 경로 설정
-    │   ├── model.py             # E2E_MHAResidualEncoder 정의
-    │   ├── utils.py             # set_seed, load_dataset, SMILESDataset
-    │   ├── Step1_preprocess.py  # FP 전처리 (StandardScaler fit/transform)
-    │   ├── Step2_pretrain.py    # E2E 학습 (ChemBERTa fine-tune + MHA)
-    │   ├── Step3_stacking.py    # Feature 추출 + Stacking + 평가 (env1)
-    │   └── Step_CV.py           # 10-Fold CV 전체 파이프라인 (env2)
+    │   ├── config.py                  # 하이퍼파라미터 및 경로 설정
+    │   ├── model.py                   # GraphMACCSEncoder (현재), E2E_FTV6/MHA 레거시
+    │   ├── graph_utils.py             # smiles_to_pyg, get_maccs
+    │   ├── differential_attention.py  # DifferentialCrossAttention
+    │   ├── utils.py                   # set_seed, load_dataset
+    │   ├── Step1_preprocess.py        # 1-A: FP 전처리 / 1-B: PyG+MACCS 캐시
+    │   ├── Step2_pretrain.py          # GraphMACCSEncoder 학습 (Stage 1)
+    │   ├── Step3_stacking.py          # Feature 추출 + Stacking + 평가 (env1)
+    │   ├── Step4_xai.py               # DiffAttn XAI 히트맵
+    │   └── Step_CV.py                 # 10-Fold CV 전체 파이프라인 (env2)
     │
     ├── data/             # env1 original 중간 결과물 (Step1 출력)
     ├── data_clean/       # env1 clean 중간 결과물
@@ -185,14 +188,14 @@ bash run.sh shell
 - test(DILIrank)는 transform only (leakage 방지)
 - 출력: `data/fp_scaler.pkl`, `data/fp_scaled_{train,test}.npy`
 
-### Step 2 — E2E 학습 (`Step2_pretrain.py`)
+### Step 2 — GraphMACCSEncoder 학습 (`Step2_pretrain.py`)
 - ChemBERTa-77M-MLM last-layer: lr=1e-4
-- MHA Residual + Projection (나머지 파라미터): lr=3e-4
+- GraphSAGE + DifferentialCrossAttention (나머지 파라미터): lr=3e-4
 - 조기종료: val AUC 기준, patience=30, max 200 epochs
-- 출력: `outputs/pretrained_encoder.pt`
+- 출력: `outputs/pretrained_graph_encoder.pt`
 
 ### Step 3 — Stacking + 평가 (`Step3_stacking.py`, env1 전용)
-- Frozen encoder로 train/test 모두 16-dim 피처 추출
+- Frozen encoder로 train/test 모두 32-dim 피처 추출
 - Base models: RF / ET / HistGB / XGB (n_estimators=300)
 - 5-fold OOF로 stacking 학습 → LR meta classifier
 - OOF에서 MCC 최적 threshold 탐색 (0.10~0.90)
@@ -200,7 +203,8 @@ bash run.sh shell
 
 ### Step CV — 10-Fold CV (`Step_CV.py`, env2 전용)
 - Step2에서 학습된 encoder를 고정(frozen)으로 재사용
-- 전체 데이터에 대해 16-dim 피처 한 번 추출 → 10-fold split
+- 전체 데이터에 대해 32-dim 피처 한 번 추출 → 10-fold split
+- encoder가 train set 기반 학습 → train 샘플 CV test fold 시 경미한 낙관 편향 존재
 - 각 fold마다 5-fold inner OOF stacking + LR meta + OOF MCC threshold
 - 출력: `outputs_cv/results_cv.csv`
 
@@ -267,11 +271,18 @@ python DGUDILI_2026/src/Step1_preprocess.py
 ## 주요 하이퍼파라미터 (`config.py`)
 
 ```python
-K          = 16      # encode() 출력 차원 (Stacking 입력)
-D_MODEL    = 64      # MHA 내부 차원
-NUM_HEADS  = 4       # MHA 헤드 수
+K          = 32      # encode() 출력 차원 (Stacking 입력)
+D_MODEL    = 64      # DiffAttn 내부 차원
+NUM_HEADS  = 4       # Differential attention 헤드 수
 DROPOUT    = 0.3
 MODEL_NAME = "DeepChem/ChemBERTa-77M-MLM"
+
+# GraphMACCSEncoder 전용
+MACCS_DIM      = 167   # MACCSkeys 차원
+MAX_ATOMS      = 100   # to_dense_batch 패딩 기준
+SAGE_LAYERS    = 2
+SAGE_HIDDEN    = 64
+ATOM_FEAT_DIM  = 43
 
 BATCH_SIZE     = 16
 MAX_LENGTH     = 256
@@ -279,31 +290,27 @@ SEED           = 42
 EPOCHS         = 200
 PATIENCE       = 30
 LR_CHEM        = 1e-4   # ChemBERTa last-layer lr
-LR_OTHER       = 3e-4   # MHA + Projection lr
+LR_OTHER       = 3e-4   # GraphSAGE + DiffAttn lr
 ```
 
 ---
 
 ## 실험 결과
 
-### env1 — Fixed Split (Test: DILIrank N=452)
+### env1 — Fixed Split (Test: DILIrank N=452, GraphMACCSEncoder)
 
-| 데이터 | AUC | MCC | F1 | ACC | Precision | Sensitivity | Specificity |
-|---|---|---|---|---|---|---|---|
-| Original | 0.9182 | 0.6670 | 0.8099 | 0.8296 | 0.7421 | 0.8913 | 0.7873 |
-| Clean | 0.8130 | 0.4675 | 0.7067 | 0.7190 | 0.6145 | 0.8315 | 0.6418 |
+| 데이터 | AUC | MCC | F1 | Sensitivity | Specificity |
+|---|---|---|---|---|---|
+| Original | 0.9224 | 0.7270 | 0.8426 | 0.9022 | 0.8358 |
 
-### env2 — 10-Fold CV
+> StackDILI 목표: AUC 0.9736, MCC 0.8304, F1 0.9010
 
-| 데이터 | AUC | MCC | F1 | ACC | Precision | Sensitivity | Specificity |
-|---|---|---|---|---|---|---|---|
-| Original | 0.9412 ±0.023 | 0.7705 ±0.050 | 0.8847 ±0.028 | 0.8838 ±0.026 | 0.9021 ±0.035 | 0.8707 ±0.052 | 0.8975 ±0.044 |
-| Clean | 0.9360 ±0.019 | 0.7811 ±0.043 | 0.8956 ±0.020 | 0.8896 ±0.022 | 0.8676 ±0.028 | 0.9259 ±0.022 | 0.8516 ±0.036 |
+### 참고: 이전 모델 결과 (E2E_MHAResidualEncoder)
 
-> **결과 해석**
-> - env2 original과 clean 성능이 유사 → 중복 분자 제거 후에도 성능이 유지됨 (일반화 신뢰도 높음)
-> - env1 clean 성능 하락(AUC 0.82)은 train set 크기 감소(1398→1187) 영향
-> - env2 기준이 가장 공정한 비교 조건 (DILIrank test 편향 없음)
+| 데이터 | AUC | MCC | F1 | Sensitivity | Specificity |
+|---|---|---|---|---|---|
+| Original (env1) | 0.9182 | 0.6670 | 0.8099 | 0.8913 | 0.7873 |
+| Clean (env1) | 0.8130 | 0.4675 | 0.7067 | 0.8315 | 0.6418 |
 
 ---
 
