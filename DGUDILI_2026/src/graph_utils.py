@@ -252,12 +252,38 @@ def get_atom_features(atom) -> list[float]:
 ATOM_FEAT_DIM = 43
 
 
+BOND_FEAT_DIM = 9
+
+
+def get_bond_features(bond) -> list:
+    """
+    결합 하나의 9-dim 피처 벡터.
+    [single, double, triple, aromatic, in_ring, conjugated,
+     stereo_none, stereo_E, stereo_Z]
+    """
+    from rdkit.Chem import rdchem
+    bt = bond.GetBondType()
+    st = bond.GetStereo()
+    return [
+        float(bt == rdchem.BondType.SINGLE),
+        float(bt == rdchem.BondType.DOUBLE),
+        float(bt == rdchem.BondType.TRIPLE),
+        float(bt == rdchem.BondType.AROMATIC),
+        float(bond.IsInRing()),
+        float(bond.GetIsConjugated()),
+        float(st == rdchem.BondStereo.STEREONONE),
+        float(st == rdchem.BondStereo.STEREOE),
+        float(st == rdchem.BondStereo.STEREOZ),
+    ]
+
+
 def smiles_to_pyg(smiles: str):
     """
     SMILES → torch_geometric.data.Data
 
     Returns:
-        Data(x=(n_atoms, ATOM_FEAT_DIM), edge_index=(2, n_bonds*2))
+        Data(x=(n_atoms, ATOM_FEAT_DIM), edge_index=(2, n_bonds*2),
+             edge_attr=(n_bonds*2, BOND_FEAT_DIM))
         None if SMILES is invalid
     """
     from torch_geometric.data import Data
@@ -270,19 +296,23 @@ def smiles_to_pyg(smiles: str):
     atom_feats = [get_atom_features(a) for a in mol.GetAtoms()]
     x = torch.tensor(atom_feats, dtype=torch.float32)  # (n_atoms, 43)
 
-    # Edge index (undirected)
-    src, dst = [], []
+    # Edge index + bond features (undirected: 각 결합 → 양방향)
+    src, dst, edge_feats = [], [], []
     for bond in mol.GetBonds():
         i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        feat = get_bond_features(bond)
         src += [i, j]
         dst += [j, i]
+        edge_feats += [feat, feat]  # 양방향 동일 피처
 
     if len(src) == 0:  # 단원자 분자
         edge_index = torch.zeros((2, 0), dtype=torch.long)
+        edge_attr  = torch.zeros((0, BOND_FEAT_DIM), dtype=torch.float32)
     else:
         edge_index = torch.tensor([src, dst], dtype=torch.long)
+        edge_attr  = torch.tensor(edge_feats, dtype=torch.float32)  # (n_bonds*2, 9)
 
-    return Data(x=x, edge_index=edge_index)
+    return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
 
 def get_maccs(smiles: str) -> torch.Tensor:

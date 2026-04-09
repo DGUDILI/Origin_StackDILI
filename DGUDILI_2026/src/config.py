@@ -23,9 +23,10 @@ SCHED_MIN_LR   = 1e-5
 # ── GraphMACCSEncoder 전용 하이퍼파라미터 ────────────────────────────────────
 MACCS_DIM      = 167    # RDKit MACCSkeys 벡터 길이 (bit 0 미사용, bits 1~166 유효)
 MAX_ATOMS      = 100    # to_dense_batch 패딩 기준 (분자당 최대 원자 수)
-SAGE_LAYERS    = 2      # GraphSAGE layer 수
-SAGE_HIDDEN    = 64     # SAGEConv hidden dim (16→64: 43-dim atom feature 병목 해소)
+SAGE_LAYERS    = 2      # GINEConv layer 수
+SAGE_HIDDEN    = 64     # GINEConv hidden dim
 ATOM_FEAT_DIM  = 43     # get_atom_features() 출력 차원 (graph_utils.py 기준)
+BOND_FEAT_DIM  = 9      # get_bond_features() 출력 차원 (graph_utils.py 기준)
 
 # ── 경로 ─────────────────────────────────────────────────────────────────────────
 ROOT             = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

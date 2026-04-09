@@ -3,7 +3,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import SAGEConv
+from torch_geometric.nn import GINEConv
 from torch_geometric.utils import to_dense_batch
 
 
@@ -16,14 +16,13 @@ class GraphMACCSEncoder(nn.Module):
              → LayerNorm → Linear(384, d_model) → chem_feat (B, d_model)  [residual]
 
       SMILES → RDKit mol → atom_features (N_total, atom_feat_dim)
-             → atom_proj Linear → SAGEConv × sage_layers
+             → atom_proj Linear → GINEConv × sage_layers (edge_attr 9-dim 활용)
              → to_dense_batch → (B, MAX_ATOMS, sage_hidden) + pad_mask
              → node_proj Linear → node_q (B, MAX_ATOMS, d_model)          [Query]
 
       SMILES → MACCSkeys (B, 167) binary
-             → Embedding(167, d_model)[idx]  (binary mask 제거, 임베딩 그대로)
-             → maccs_kv (B, 167, d_model)                                 [Key/Value]
-             → inactive bit mask → DiffAttn kv_padding_mask으로 전달 (score -1e9)
+             → Embedding(167, d_model)[idx] * maccs (binary gate)
+             → maccs_kv (B, 167, d_model)  비활성 bit → 0벡터             [Key/Value]
 
       DifferentialCrossAttention → attn_out (B, MAX_ATOMS, d_model)
                                    attn_weights (B, MAX_ATOMS, 167)  ← XAI
@@ -69,24 +68,31 @@ class GraphMACCSEncoder(nn.Module):
         self.chem_norm = nn.LayerNorm(chem_in_dim)
         self.chem_proj = nn.Linear(chem_in_dim, d_model)
 
-        # ── GraphSAGE ─────────────────────────────────────────────────────────
+        # ── GINE (Graph Isomorphism Network with Edge features) ───────────────
+        bond_feat_dim = 9  # get_bond_features() 출력 dim (graph_utils.BOND_FEAT_DIM)
         self.atom_proj  = nn.Linear(atom_feat_dim, sage_hidden)
+        self.edge_proj  = nn.Linear(bond_feat_dim, sage_hidden)  # edge_attr → sage_hidden
         self.sage_convs = nn.ModuleList()
         self.sage_bns   = nn.ModuleList()
         for _ in range(sage_layers):
-            self.sage_convs.append(SAGEConv(sage_hidden, sage_hidden))
+            mlp = nn.Sequential(
+                nn.Linear(sage_hidden, sage_hidden),
+                nn.ReLU(),
+                nn.Linear(sage_hidden, sage_hidden),
+            )
+            self.sage_convs.append(GINEConv(mlp, edge_dim=sage_hidden))
             self.sage_bns.append(nn.BatchNorm1d(sage_hidden))
         self.node_proj = nn.Linear(sage_hidden, d_model)
 
         # ── MACCS Identity Embedding ───────────────────────────────────────────
         # bit 인덱스(0~166) → d_model-dim 학습 벡터
-        # inactive key는 attention score 단계에서 -1e9 마스킹으로 처리 (diff_attn kv_padding_mask)
+        # 비활성 bit: binary gate(maccs * emb)로 0벡터화 — gradient 완전 차단
         self.maccs_emb = nn.Embedding(maccs_dim, d_model)
         nn.init.normal_(self.maccs_emb.weight, std=0.02)
 
         # ── Differential Cross-Attention ───────────────────────────────────────
         self.diff_attn = DifferentialCrossAttention(
-            d_model=d_model, num_heads=num_heads, dropout=0.1
+            d_model=d_model, num_heads=num_heads, dropout=dropout
         )
 
         # ── Fusion + MLP ───────────────────────────────────────────────────────
@@ -123,11 +129,12 @@ class GraphMACCSEncoder(nn.Module):
         cls = self._cls_embed(input_ids, attention_mask)       # (B, 384)
         chem_feat = self.chem_proj(self.chem_norm(cls))        # (B, d_model)
 
-        # ── GraphSAGE ──────────────────────────────────────────────────────────
-        x = self.atom_proj(graph_batch.x)                      # (N_total, sage_hidden)
+        # ── GINE ──────────────────────────────────────────────────────────────
+        x          = self.atom_proj(graph_batch.x)             # (N_total, sage_hidden)
         edge_index = graph_batch.edge_index
+        edge_attr  = self.edge_proj(graph_batch.edge_attr)     # (E, sage_hidden)
         for conv, bn in zip(self.sage_convs, self.sage_bns):
-            x = torch.relu(bn(conv(x, edge_index)))            # (N_total, sage_hidden)
+            x = torch.relu(bn(conv(x, edge_index, edge_attr))) # (N_total, sage_hidden)
 
         # to_dense_batch: variable nodes → padded dense tensor
         node_dense, pad_mask = to_dense_batch(
@@ -140,16 +147,14 @@ class GraphMACCSEncoder(nn.Module):
 
         # ── MACCS Identity Embedding ────────────────────────────────────────────
         idx = torch.arange(maccs.size(1), device=device).unsqueeze(0).expand(B, -1)
-        maccs_kv = self.maccs_emb(idx)  # (B, 167, d_model) — binary mask 곱 제거
-        # inactive bit는 embedding을 0으로 만드는 대신,
-        # attention score 단계에서 -1e9 마스킹으로 처리 (softmax 분모 오염 방지)
-        maccs_inactive = (maccs == 0)   # (B, 167) bool, True = inactive bit
+        # binary gate: 비활성 bit(0) → 0벡터, 그래디언트 완전 차단
+        maccs_kv = self.maccs_emb(idx) * maccs.unsqueeze(-1)  # (B, 167, d_model)
 
         # ── Differential Cross-Attention ────────────────────────────────────────
         attn_out, attn_weights = self.diff_attn(
-            query=node_q,                    # (B, MAX_ATOMS, d_model)
-            key_value=maccs_kv,              # (B, 167, d_model)
-            kv_padding_mask=maccs_inactive,  # (B, 167) bool, True = inactive
+            query=node_q,     # (B, MAX_ATOMS, d_model)
+            key_value=maccs_kv,  # (B, 167, d_model)
+            kv_padding_mask=None,  # binary gate가 비활성 bit 처리
         )  # out: (B, MAX_ATOMS, d_model), weights: (B, MAX_ATOMS, 167)
 
         self._last_attn_weights = attn_weights.detach()

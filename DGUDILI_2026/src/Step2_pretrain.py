@@ -188,7 +188,8 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode="max", factor=SCHED_FACTOR,
     patience=SCHED_PATIENCE, min_lr=SCHED_MIN_LR,
 )
-criterion = nn.BCEWithLogitsLoss()
+pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32).to(device)
+criterion  = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
 
 # ── 추론 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -240,7 +241,7 @@ for epoch in range(1, EPOCHS + 1):
 
     scheduler.step(val_auc)
 
-    if epoch % 10 == 0 or epoch == 1:
+    if epoch % 5 == 0 or epoch == 1:
         cur_lr    = optimizer.param_groups[0]["lr"]
         best_mark = " * best" if val_auc > best_val_auc else ""
         print(
