@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DGUDILI 2026 / StackDILI — 파이프라인 구조 및 환경 가이드</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f5f7fa;
+    --surface2: #ebeef5;
+    --border: #d0d7e6;
+    --accent: #2563eb;
+    --accent2: #7c3abf;
+    --green: #16a34a;
+    --yellow: #b45309;
+    --orange: #c2550a;
+    --red: #dc2626;
+    --text: #1e2440;
+    --muted: #5a6380;
+    --code-bg: #f0f2f8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 32px 24px;
+    max-width: 1320px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.8rem; color: #0f172a; margin-bottom: 6px; }
+  h2 { font-size: 1.25rem; color: var(--accent); margin: 32px 0 14px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 1.0rem; color: #1e2440; margin: 18px 0 8px; }
+  h4 { font-size: 0.9rem; color: var(--muted); margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  p { margin-bottom: 10px; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 18px;
+  }
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .card-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  @media(max-width: 900px) {
+    .card-grid { grid-template-columns: 1fr; }
+    .card-grid-4 { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    margin-right: 5px;
+  }
+  .tag-blue  { background: #dbeafe; color: #1d4ed8; }
+  .tag-purple{ background: #ede9fe; color: #6d28d9; }
+  .tag-green { background: #dcfce7; color: #15803d; }
+  .tag-orange{ background: #ffedd5; color: #c2550a; }
+  .tag-red   { background: #fee2e2; color: #b91c1c; }
+  .tag-gray  { background: #e5e7eb; color: #4b5563; }
+
+  /* Pipeline steps */
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .step {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 4px;
+    overflow: hidden;
+  }
+  .step-header {
+    background: var(--surface2);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-right: 1px solid var(--border);
+    min-width: 0;
+  }
+  .step-num {
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .step-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1e2440;
+  }
+  .step-file {
+    font-size: 0.72rem;
+    color: var(--accent);
+    font-family: monospace;
+  }
+  .step-body {
+    padding: 14px 18px;
+  }
+  .io-row {
+    display: grid;
+    grid-template-columns: 1fr 28px 1fr;
+    gap: 8px;
+    align-items: start;
+    margin-bottom: 8px;
+  }
+  .io-row:last-child { margin-bottom: 0; }
+  .io-box {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    font-family: monospace;
+  }
+  .io-box .io-label {
+    font-size: 0.66rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+  .io-arrow {
+    color: var(--muted);
+    font-size: 1.1rem;
+    text-align: center;
+    padding-top: 10px;
+  }
+  .io-file { color: var(--yellow); }
+  .io-data { color: var(--green); }
+  .io-model { color: var(--accent); }
+  .io-result { color: var(--orange); }
+
+  /* Connector */
+  .step-connector {
+    width: 2px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 auto 4px;
+  }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    margin: 10px 0 16px;
+  }
+  th {
+    background: var(--surface2);
+    color: #374151;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.72rem;
+  }
+  td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #15182200; }
+  tr:hover td { background: var(--surface2); }
+  .highlight-row td { background: #dbeafe !important; }
+
+  /* Env badge */
+  .env-label {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+  }
+  .env1 { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+  .env2 { background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd; }
+  .orig { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+  .cln  { background: #ffedd5; color: #c2550a; border: 1px solid #fdba74; }
+  .stackdili { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85em;
+    color: var(--yellow);
+  }
+
+  .note {
+    background: #eff6ff;
+    border-left: 3px solid var(--accent);
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.82rem;
+    margin: 10px 0;
+    color: #1e40af;
+  }
+  .warn {
+    background: #fffbeb;
+    border-left: 3px solid #d97706;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.82rem;
+    margin: 10px 0;
+    color: #92400e;
+  }
+
+  .model-arch {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-family: monospace;
+    font-size: 0.78rem;
+    line-height: 1.8;
+    color: #1e2440;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .metric-badge {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    margin: 2px;
+  }
+  .metric-val { color: var(--green); font-weight: 600; }
+  .metric-key { color: var(--muted); font-size: 0.72rem; }
+
+  .section-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 32px 0;
+  }
+
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+  }
+  .flow-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    text-align: center;
+    color: var(--text);
+  }
+  .flow-arrow { color: var(--muted); font-size: 1.2rem; }
+
+  ul { padding-left: 20px; margin: 6px 0; }
+  li { margin-bottom: 4px; }
+  li::marker { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>DGUDILI 2026 &amp; StackDILI — 파이프라인 구조 가이드</h1>
+<p class="subtitle">데이터 버전(Original / Clean) × 실험 환경(env1 / env2) 기준 단계별 Input/Output 정리</p>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 0: 전체 개요
+     ════════════════════════════════════════════════════════ -->
+<h2>0. 전체 개요</h2>
+
+<div class="card-grid-4">
+  <div class="card">
+    <div class="env-label env1">env1</div>
+    <div class="env-label orig">Original</div>
+    <h3 style="margin-top:8px">고정 분할 + 원본 데이터</h3>
+    <p style="color:var(--muted);font-size:0.82rem">StackDILI 논문과 동일 조건. Train 1,398 / Test 452</p>
+  </div>
+  <div class="card">
+    <div class="env-label env1">env1</div>
+    <div class="env-label cln">Clean</div>
+    <h3 style="margin-top:8px">고정 분할 + 중복 제거 데이터</h3>
+    <p style="color:var(--muted);font-size:0.82rem">Train에서 Test 중복 211개 제거. Train 1,187 / Test 452</p>
+  </div>
+  <div class="card">
+    <div class="env-label env2">env2</div>
+    <div class="env-label orig">Original</div>
+    <h3 style="margin-top:8px">10-Fold CV + 원본 데이터</h3>
+    <p style="color:var(--muted);font-size:0.82rem">전체 1,850개 CV. env1 encoder 재사용 필요</p>
+  </div>
+  <div class="card">
+    <div class="env-label env2">env2</div>
+    <div class="env-label cln">Clean</div>
+    <h3 style="margin-top:8px">10-Fold CV + 중복 제거 데이터</h3>
+    <p style="color:var(--muted);font-size:0.82rem">전체 1,639개 CV. env1-clean encoder 재사용 필요</p>
+  </div>
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>모델 비교</h3>
+    <table>
+      <tr><th>항목</th><th>DGUDILI 2026</th><th>StackDILI (논문 기준)</th></tr>
+      <tr><td>분자 표현</td><td>GraphSAGE + MACCSkeys + ChemBERTa</td><td>GA 선택 FP + 사전학습 없음</td></tr>
+      <tr><td>Attention</td><td>Differential Cross-Attention</td><td>없음 (직접 FP 사용)</td></tr>
+      <tr><td>딥러닝</td><td>ChemBERTa 마지막 레이어 fine-tune</td><td>없음</td></tr>
+      <tr><td>Stacking</td><td>RF / ET / HistGB / XGB → LR meta</td><td>RF / ET / HistGB / XGB → LR meta</td></tr>
+      <tr><td>피처 차원</td><td>32-dim (encode() 출력)</td><td>GA 선택 FP (~수백 차원)</td></tr>
+      <tr><td>Test 기준</td><td>DILIrank (N=452)</td><td>DILIrank (N=452)</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>실험 성능 (env1 / original / DILIrank)</h3>
+    <table>
+      <tr><th>모델</th><th>AUC</th><th>MCC</th><th>F1</th><th>Sensitivity</th><th>Specificity</th></tr>
+      <tr class="highlight-row">
+        <td><span class="tag tag-red">목표</span> StackDILI</td>
+        <td>0.9736</td><td>0.8304</td><td>0.9010</td><td>0.9402</td><td>0.8993</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">현재</span> DGUDILI</td>
+        <td>0.9224</td><td>0.7270</td><td>0.8426</td><td>0.9022</td><td>0.8358</td>
+      </tr>
+      <tr>
+        <td>Gap</td>
+        <td style="color:var(--red)">-0.051</td>
+        <td style="color:var(--red)">-0.103</td>
+        <td style="color:var(--red)">-0.058</td>
+        <td style="color:var(--red)">-0.038</td>
+        <td style="color:var(--red)">-0.063</td>
+      </tr>
+    </table>
+    <div class="note">StackDILI 수치는 Step3에 하드코딩된 비교값. 실제 StackDILI 파이프라인은 <code>compute_stackdili_cv_baseline.py</code>로 별도 실행.</div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 1: 데이터 버전
+     ════════════════════════════════════════════════════════ -->
+<h2>1. 데이터 버전: Original vs Clean</h2>
+
+<div class="card-grid">
+  <div class="card">
+    <span class="env-label orig">Original 데이터</span>
+    <h3>원본 전체 데이터</h3>
+    <table>
+      <tr><th>항목</th><th>값</th></tr>
+      <tr><td>Train (non-DILIrank)</td><td>1,398개</td></tr>
+      <tr><td>Test (DILIrank)</td><td>452개</td></tr>
+      <tr><td>전체</td><td>1,850개</td></tr>
+      <tr><td>Train ∩ Test 중복</td><td><span style="color:var(--red)">211개</span></td></tr>
+    </table>
+    <h4 style="margin-top:12px">파일 경로</h4>
+    <div class="io-box">
+      <div><span class="io-file">Data/Dataset.csv</span></div>
+      <div><span class="io-file">Code/Dataset_feature.csv</span></div>
+      <div><span style="color:var(--muted)">→ DGUDILI_2026/data/</span></div>
+    </div>
+    <div class="warn" style="margin-top:12px">Train에 Test와 동일한 분자가 211개 포함 → 모델이 테스트 분자를 학습에 활용할 수 있음 → 낙관적 평가 위험</div>
+  </div>
+  <div class="card">
+    <span class="env-label cln">Clean 데이터</span>
+    <h3>Train/Test 중복 제거 데이터</h3>
+    <table>
+      <tr><th>항목</th><th>값</th></tr>
+      <tr><td>Train (중복 제거 후)</td><td>1,187개</td></tr>
+      <tr><td>Test (DILIrank, 동일)</td><td>452개</td></tr>
+      <tr><td>전체</td><td>1,639개</td></tr>
+      <tr><td>Train에서 제거된 샘플</td><td><span style="color:var(--green)">211개 제거</span></td></tr>
+    </table>
+    <h4 style="margin-top:12px">파일 경로</h4>
+    <div class="io-box">
+      <div><span class="io-file">Data/Dataset_clean.csv</span></div>
+      <div><span class="io-file">Code/Dataset_feature_clean.csv</span></div>
+      <div><span style="color:var(--muted)">→ DGUDILI_2026/data_clean/</span></div>
+    </div>
+    <div class="note" style="margin-top:12px">RDKit canonical SMILES 기준으로 중복 판별. SMILES 표기가 달라도 동일 분자면 제거. Test는 절대 수정 안 함 (벤치마크 기준 유지).</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>중복 제거 절차 (<code>make_clean_data.py</code>)</h3>
+  <div class="pipeline">
+    <div class="step">
+      <div class="step-header">
+        <span class="step-num">Input</span>
+        <span class="step-name">원본 CSV 로드</span>
+        <span class="step-file">make_clean_data.py</span>
+      </div>
+      <div class="step-body">
+        <div class="io-row">
+          <div class="io-box">
+            <div class="io-label">Input</div>
+            <div class="io-file">Data/Dataset.csv</div>
+            <div class="io-file">Code/Dataset_feature.csv</div>
+            <div style="color:var(--muted);font-size:0.72rem">SMILES, Label, ref (출처 DB)</div>
+          </div>
+          <div class="io-arrow">→</div>
+          <div class="io-box">
+            <div class="io-label">처리</div>
+            <div class="io-data">SMILES → RDKit canonical SMILES 변환</div>
+            <div class="io-data">train_canon ∩ test_canon = overlap (211개)</div>
+            <div class="io-data">train에서 overlap 행 제거 (test 불변)</div>
+          </div>
+        </div>
+        <div class="io-row">
+          <div class="io-box">
+            <div class="io-label">Output</div>
+            <div class="io-file">Data/Dataset_clean.csv</div>
+            <div class="io-file">Code/Dataset_feature_clean.csv</div>
+          </div>
+          <div class="io-arrow">←</div>
+          <div class="io-box">
+            <div class="io-label">조건</div>
+            <div style="color:var(--yellow)">run.sh run-clean 시 자동 실행</div>
+            <div style="color:var(--muted);font-size:0.72rem">Docker 컨테이너 내부에서 RDKit 실행</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin-top:16px">데이터셋 구성 차이 요약</h4>
+  <table>
+    <tr><th>구분</th><th>Original</th><th>Clean</th><th>차이 및 영향</th></tr>
+    <tr>
+      <td>Train 크기</td><td>1,398</td><td>1,187</td>
+      <td>211개 감소 → encoder 학습 데이터 부족 가능성</td>
+    </tr>
+    <tr>
+      <td>Test 크기</td><td>452</td><td>452</td>
+      <td>동일 (DILIrank 벤치마크 고정)</td>
+    </tr>
+    <tr>
+      <td>Train/Test 중복</td>
+      <td style="color:var(--red)">211개 포함</td>
+      <td style="color:var(--green)">0개 (완전 제거)</td>
+      <td>Clean이 더 엄격한 평가 조건</td>
+    </tr>
+    <tr>
+      <td>env2 전체 샘플</td><td>1,850</td><td>1,639</td>
+      <td>CV fold 구성 샘플 수 차이</td>
+    </tr>
+    <tr>
+      <td>평가 bias</td>
+      <td style="color:var(--yellow)">낙관적 (data leakage 가능)</td>
+      <td style="color:var(--green)">보수적 (엄격한 독립 평가)</td>
+      <td>논문 제출 시 Clean 결과가 더 신뢰성 높음</td>
+    </tr>
+    <tr>
+      <td>StackDILI 동등 조건</td>
+      <td style="color:var(--green)">Original = StackDILI와 동일 데이터</td>
+      <td style="color:var(--muted)">StackDILI 원논문과 다른 조건</td>
+      <td>공정 비교는 Original 기준</td>
+    </tr>
+  </table>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 2: 환경 구성
+     ════════════════════════════════════════════════════════ -->
+<h2>2. 실험 환경: env1 vs env2</h2>
+
+<div class="card-grid">
+  <div class="card">
+    <span class="env-label env1">env1 — Fixed Split</span>
+    <h3>고정 Train/Test 분할 평가</h3>
+    <p>원본 데이터의 레이블(ref 컬럼) 기준으로 고정 분할:</p>
+    <ul>
+      <li><strong>Train:</strong> ref ≠ "DILIrank" (다중 DB 혼합)</li>
+      <li><strong>Test:</strong> ref = "DILIrank" (벤치마크, N=452)</li>
+    </ul>
+    <h4 style="margin-top:12px">실행 흐름</h4>
+    <div class="flow-diagram">
+      <div class="flow-box" style="background:#dbeafe;border-color:#93c5fd;color:#1d4ed8">Step1<br><small>전처리</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box" style="background:#dbeafe;border-color:#93c5fd;color:#1d4ed8">Step2<br><small>Encoder 학습</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box" style="background:#dbeafe;border-color:#93c5fd;color:#1d4ed8">Step3<br><small>Stacking + 평가</small></div>
+    </div>
+    <h4 style="margin-top:12px">출력 디렉토리</h4>
+    <ul>
+      <li>Original: <code>DGUDILI_2026/data/</code>, <code>outputs/</code></li>
+      <li>Clean: <code>DGUDILI_2026/data_clean/</code>, <code>outputs_clean/</code></li>
+    </ul>
+    <h4 style="margin-top:12px">장점</h4>
+    <ul>
+      <li>StackDILI 논문과 동일 평가 조건 → 공정 비교 가능</li>
+      <li>실행 시간이 짧음</li>
+      <li>Encoder 학습 완료 후 즉시 결과 확인</li>
+    </ul>
+    <h4 style="margin-top:8px">주의</h4>
+    <ul>
+      <li>Train/Test 분포 이동 존재 (다중 DB vs DILIrank)</li>
+      <li>단일 split → 결과 분산 측정 불가</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="env-label env2">env2 — 10-Fold CV</span>
+    <h3>전체 데이터 10-Fold Stratified CV</h3>
+    <p>Train + Test 전체 데이터를 합쳐 10-Fold CV로 일반화 성능 측정:</p>
+    <ul>
+      <li><strong>전체 데이터:</strong> Original 1,850개 / Clean 1,639개</li>
+      <li><strong>Encoder:</strong> env1에서 학습된 <code>pretrained_graph_encoder.pt</code> 재사용 (frozen)</li>
+      <li><strong>Stacking:</strong> 각 fold마다 내부 5-fold OOF + LR meta 재학습</li>
+    </ul>
+    <h4 style="margin-top:12px">실행 흐름</h4>
+    <div class="flow-diagram">
+      <div class="flow-box" style="background:#ede9fe;border-color:#c4b5fd;color:#6d28d9;font-size:0.72rem">env1 먼저<br>실행 필요</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box" style="background:#ede9fe;border-color:#c4b5fd;color:#6d28d9">Step_CV<br><small>10-Fold CV</small></div>
+    </div>
+    <h4 style="margin-top:12px">출력 디렉토리</h4>
+    <ul>
+      <li>Original: <code>outputs_cv/results_cv.csv</code></li>
+      <li>Clean: <code>outputs_cv_clean/results_cv.csv</code></li>
+    </ul>
+    <h4 style="margin-top:12px">장점</h4>
+    <ul>
+      <li>평균 ± 표준편차 측정 → 모델 안정성 파악</li>
+      <li>전체 데이터 활용 → 더 많은 fold에서 테스트</li>
+      <li>DILIrank 샘플도 일부 fold에서 train으로 사용 → 분포 이동 영향 완화</li>
+    </ul>
+    <h4 style="margin-top:8px">주의</h4>
+    <ul>
+      <li>Encoder가 원래 train set 기반 학습 → train 샘플이 CV test fold가 될 때 경미한 낙관 편향</li>
+      <li>DILIrank 샘플은 encoder 학습에 미포함 → 해당 편향 없음</li>
+      <li>실행 시간이 env1보다 훨씬 김</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <h3>환경 변수 설정 방식 (<code>config.py</code> 기준)</h3>
+  <table>
+    <tr><th>환경변수</th><th>값</th><th>효과</th></tr>
+    <tr>
+      <td><code>USE_CLEAN_DATA</code></td>
+      <td><code>0</code> (기본)</td>
+      <td>data/, outputs/ 사용 → Original 데이터</td>
+    </tr>
+    <tr>
+      <td><code>USE_CLEAN_DATA</code></td>
+      <td><code>1</code></td>
+      <td>data_clean/, outputs_clean/ 사용 → Clean 데이터</td>
+    </tr>
+    <tr>
+      <td><code>STACKDILI_ROOT</code></td>
+      <td><code>/workspace</code> (Docker)</td>
+      <td>Data/, Code/ CSV 파일 위치 기준 경로</td>
+    </tr>
+  </table>
+  <div class="note">run.sh가 Docker 실행 시 자동으로 환경변수를 주입합니다. 로컬 실행 시 <code>export USE_CLEAN_DATA=1</code>로 수동 설정 필요.</div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 3: DGUDILI 모델 아키텍처
+     ════════════════════════════════════════════════════════ -->
+<h2>3. DGUDILI 2026 — 모델 아키텍처</h2>
+
+<div class="card">
+  <div class="model-arch">
+SMILES (입력)
+  │
+  ├─── [ChemBERTa Branch] ──────────────────────────────────────────────────────
+  │    ChemBERTa-77M-MLM (마지막 레이어만 unfreeze, lr=1e-4)
+  │    → CLS 토큰 (B, 384)
+  │    → LayerNorm(384) → Linear(384→64) → chem_feat (B, 64)
+  │
+  ├─── [GraphSAGE Branch] ──────────────────────────────────────────────────────
+  │    SMILES → RDKit mol → 43-dim 원자 특성 (원자 번호, 고리 여부 등)
+  │    → Linear(43→64) → SAGEConv×2 (hidden=64) + BatchNorm
+  │    → to_dense_batch → (B, 100, 64) + pad_mask          [Query Q]
+  │    → Linear(64→64) → node_q (B, 100, 64)
+  │
+  └─── [MACCS Branch] ─────────────────────────────────────────────────────────
+       SMILES → RDKit MACCSkeys → 167-bit binary vector (B, 167)
+       → Embedding(167, 64) → maccs_kv (B, 167, 64)
+       inactive bits → DiffAttn kv_padding_mask으로 -1e9 마스킹  [Key/Value KV]
+
+                      ↓
+       DifferentialCrossAttention (Q=node_q, K/V=maccs_kv)
+       [arxiv 2410.05258 기반 cross-attn 변형, λ.clamp(min=1e-4)]
+       → attn_out (B, 100, 64)
+       → masked_mean_pool → graph_feat (B, 64)
+
+                      ↓
+       concat([chem_feat (B,64), graph_feat (B,64)]) = (B, 128)
+       → fuse_proj Linear(128→64) → LayerNorm(64)
+       → Linear(64→32) → GELU → Dropout(0.3)
+       → encode_out (B, 32)    ← Step3 Stacking 입력
+
+                      ↓ [Stage 1: Step2]
+       Linear(32→1) + BCEWithLogitsLoss → 이진 분류 학습
+
+                      ↓ [Stage 2: Step3]
+       Stacking: RF / ET / HistGB / XGB (5-fold OOF) → LR meta → 최종 예측
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 4: env1 파이프라인 상세
+     ════════════════════════════════════════════════════════ -->
+<h2>4. env1 — Fixed Split 파이프라인 (Step별 Input/Output)</h2>
+
+<div class="note">실행 명령: <code>bash run.sh run</code> (Original) / <code>bash run.sh run-clean</code> (Clean)</div>
+
+<!-- 전처리 단계 (Original/Clean 공통) -->
+<h3>Step 0 — [Clean 전용] 중복 제거 <code>make_clean_data.py</code></h3>
+<div class="step" style="margin-bottom:12px">
+  <div class="step-header">
+    <span class="step-num">Step 0</span>
+    <span class="step-name">중복 제거</span>
+    <span class="step-file">make_clean_data.py</span>
+    <span class="tag tag-orange" style="margin-top:4px">Clean only</span>
+  </div>
+  <div class="step-body">
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Input (원본 CSV)</div>
+        <div class="io-file">Data/Dataset.csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">SMILES, Label, ref 컬럼</div>
+        <br>
+        <div class="io-file">Code/Dataset_feature.csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">FP 피처 (Morgan 등 ~425 dim)</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">Output (Clean CSV)</div>
+        <div class="io-file">Data/Dataset_clean.csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">Train 211개 제거 (1,398→1,187)</div>
+        <br>
+        <div class="io-file">Code/Dataset_feature_clean.csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">동일 행 제거 적용</div>
+      </div>
+    </div>
+    <div class="note">RDKit canonical SMILES 변환 후 train∩test 교집합 탐지 → train에서만 제거 (test 불변)</div>
+  </div>
+</div>
+
+<h3>Step 1 — 전처리 <code>Step1_preprocess.py</code></h3>
+<div class="step" style="margin-bottom:4px">
+  <div class="step-header">
+    <span class="step-num">Step 1-A</span>
+    <span class="step-name">FP 전처리</span>
+    <span class="step-file">Step1_preprocess.py</span>
+    <span class="tag tag-gray" style="margin-top:4px">StandardScaler</span>
+  </div>
+  <div class="step-body">
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Input</div>
+        <div class="io-file">Data/Dataset[_clean].csv</div>
+        <div class="io-file">Code/Dataset_feature[_clean].csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">전체 ~425-dim FP + SMILES + Label + ref</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">처리</div>
+        <div class="io-data">ref != "DILIrank" → Train mask</div>
+        <div class="io-data">ref == "DILIrank" → Test mask</div>
+        <div class="io-data">StandardScaler.fit(Train) → transform(Train, Test)</div>
+        <div style="color:var(--muted);font-size:0.72rem">⚠️ Test는 transform only (leakage 방지)</div>
+      </div>
+    </div>
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Output → data[_clean]/</div>
+        <div class="io-file">fp_full_train.npy</div>
+        <div style="color:var(--muted);font-size:0.72rem">shape: (1398, 425) or (1187, 425)</div>
+        <div class="io-file">fp_full_test.npy</div>
+        <div style="color:var(--muted);font-size:0.72rem">shape: (452, 425)</div>
+        <div class="io-file">y_train.npy, y_test.npy</div>
+        <div class="io-file">smiles_train.npy, smiles_test.npy</div>
+        <div class="io-file">scalers.pkl</div>
+        <div style="color:var(--muted);font-size:0.72rem">StandardScaler 객체 보존</div>
+        <div class="io-file">fp_feature_names.json</div>
+      </div>
+      <div class="io-arrow">←</div>
+      <div class="io-box">
+        <div class="io-label">참고</div>
+        <div style="color:var(--muted)">Step1-A 출력은 레거시 FP 파이프라인(E2E 모델) 전용.<br>GraphMACCSEncoder는 Step1-B 출력을 사용함.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="step-connector"></div>
+<div class="step" style="margin-bottom:12px">
+  <div class="step-header">
+    <span class="step-num">Step 1-B</span>
+    <span class="step-name">Graph + MACCS 캐시</span>
+    <span class="step-file">Step1_preprocess.py</span>
+    <span class="tag tag-blue" style="margin-top:4px">RDKit + PyG</span>
+  </div>
+  <div class="step-body">
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Input</div>
+        <div class="io-data">smiles_train (1,398 or 1,187개 SMILES)</div>
+        <div class="io-data">smiles_test (452개 SMILES)</div>
+        <div class="io-data">y_train, y_test (레이블)</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">처리 (SMILES → 분자 표현)</div>
+        <div class="io-data">SMILES → RDKit mol → PyG Data</div>
+        <div style="color:var(--muted);font-size:0.72rem">원자: 43-dim 특성 (원자번호, 고리 여부, 전하 등)</div>
+        <div style="color:var(--muted);font-size:0.72rem">결합: edge_index (방향 있는 인접행렬)</div>
+        <div class="io-data">SMILES → MACCSkeys → (167,) float32 binary</div>
+        <div style="color:var(--muted);font-size:0.72rem">167-bit 구조 키 (bit 0=미사용, bits 1~166)</div>
+      </div>
+    </div>
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Output → data[_clean]/</div>
+        <div class="io-file">train_graphs.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">List[{pyg, maccs, label, smiles}] (1,398 or 1,187개)</div>
+        <div class="io-file">test_graphs.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">List[{pyg, maccs, label, smiles}] (452개)</div>
+      </div>
+      <div class="io-arrow">←</div>
+      <div class="io-box">
+        <div class="io-label">캐시 전략</div>
+        <div style="color:var(--muted)">이미 .pt 파일이 존재하면 skip (on-the-fly RDKit 연산 반복 회피).<br><code>--force</code> 플래그로 강제 재생성 가능.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>Step 2 — GraphMACCSEncoder 학습 <code>Step2_pretrain.py</code></h3>
+<div class="step" style="margin-bottom:12px">
+  <div class="step-header">
+    <span class="step-num">Step 2</span>
+    <span class="step-name">Encoder Pre-training</span>
+    <span class="step-file">Step2_pretrain.py</span>
+    <span class="tag tag-blue" style="margin-top:4px">Stage 1</span>
+  </div>
+  <div class="step-body">
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Input</div>
+        <div class="io-file">data[_clean]/train_graphs.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">1,398 or 1,187개 분자 (PyG + MACCS + label + SMILES)</div>
+        <br>
+        <div class="io-data">내부에서 85/15 stratified split:</div>
+        <div style="color:var(--muted);font-size:0.72rem">train subset: ~1,188 or ~1,009개</div>
+        <div style="color:var(--muted);font-size:0.72rem">val subset: ~210 or ~178개</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">학습 설정</div>
+        <div class="io-data">GraphMACCSEncoder (ChemBERTa + GraphSAGE + DiffAttn)</div>
+        <div style="color:var(--muted);font-size:0.72rem">ChemBERTa last-layer: lr=1e-4 (나머지 frozen)</div>
+        <div style="color:var(--muted);font-size:0.72rem">GraphSAGE + DiffAttn: lr=3e-4</div>
+        <div style="color:var(--muted);font-size:0.72rem">BCEWithLogitsLoss + gradient clipping (max_norm=1.0)</div>
+        <div style="color:var(--muted);font-size:0.72rem">Early stopping: val_AUC (max, patience=30)</div>
+        <div style="color:var(--muted);font-size:0.72rem">ReduceLROnPlateau (max, factor=0.5, patience=8)</div>
+        <div style="color:var(--muted);font-size:0.72rem">Max 200 epochs, seed=42 완전 고정</div>
+      </div>
+    </div>
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">중간 캐시 (토크나이징)</div>
+        <div class="io-file">data[_clean]/graph_train_tokens_42.pt</div>
+        <div class="io-file">data[_clean]/graph_val_tokens_42.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">ChemBERTa 토크나이징 결과 캐시 (max_length=256)</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">Output → outputs[_clean]/</div>
+        <div class="io-model">pretrained_graph_encoder.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">val_AUC 최고점 checkpoint의 state_dict</div>
+        <div style="color:var(--muted);font-size:0.72rem">val_AUC ≈ 0.63~0.70 (train 분포 기준)</div>
+        <div style="color:var(--muted);font-size:0.72rem">test_AUC ≈ 0.90~0.93 (DILIrank, Step3에서 확인)</div>
+      </div>
+    </div>
+    <div class="warn">val_loss 기준 조기종료 사용 시 epoch 2~5에 수렴 → 미학습 상태로 test AUC 급락. 반드시 val_AUC(mode=max) 기준 사용. 현재 구현에 적용됨.</div>
+  </div>
+</div>
+
+<h3>Step 3 — Feature 추출 + Stacking + 평가 <code>Step3_stacking.py</code></h3>
+<div class="step" style="margin-bottom:12px">
+  <div class="step-header">
+    <span class="step-num">Step 3</span>
+    <span class="step-name">Stacking + 평가</span>
+    <span class="step-file">Step3_stacking.py</span>
+    <span class="tag tag-green" style="margin-top:4px">Stage 2</span>
+    <span class="tag tag-gray" style="margin-top:4px">env1 전용</span>
+  </div>
+  <div class="step-body">
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Input</div>
+        <div class="io-model">outputs[_clean]/pretrained_graph_encoder.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">Step2 학습 결과 (frozen으로 사용)</div>
+        <br>
+        <div class="io-file">data[_clean]/train_graphs.pt</div>
+        <div class="io-file">data[_clean]/test_graphs.pt</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">처리 1: Feature 추출 (frozen encoder)</div>
+        <div class="io-data">Train 분자 전체 → encoder.encode() → (N_train, 32)</div>
+        <div class="io-data">Test 분자 전체 → encoder.encode() → (452, 32)</div>
+        <div style="color:var(--muted);font-size:0.72rem">grad 없음 (torch.no_grad)</div>
+      </div>
+    </div>
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">처리 2: 5-Fold OOF Stacking</div>
+        <div class="io-data">Base models: RF / ET / HistGB / XGB (n=300)</div>
+        <div style="color:var(--muted);font-size:0.72rem">각 모델: 5-fold OOF로 train 예측 확률 생성</div>
+        <div style="color:var(--muted);font-size:0.72rem">test 예측: 5 fold 평균</div>
+        <div class="io-data">oof_probs: (N_train, 4) → Meta: LR.fit(oof_probs, y_train)</div>
+        <div class="io-data">OOF MCC 최적 threshold (0.10~0.90 탐색)</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">Output → outputs[_clean]/</div>
+        <div class="io-result">results.csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">StackDILI vs DGUDILI_2026 비교표</div>
+        <div style="color:var(--muted);font-size:0.72rem">AUC, MCC, F1, ACC, Precision, Sensitivity, Specificity</div>
+        <br>
+        <div style="color:var(--muted);font-size:0.72rem">콘솔 출력: 상세 비교 테이블</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 5: env2 파이프라인 상세
+     ════════════════════════════════════════════════════════ -->
+<h2>5. env2 — 10-Fold CV 파이프라인 (Step별 Input/Output)</h2>
+
+<div class="warn">env2 실행 전 동일 데이터 버전(Original or Clean)으로 env1을 먼저 실행해야 합니다 → <code>pretrained_graph_encoder.pt</code> 필요.</div>
+
+<div class="note">실행 명령: <code>bash run.sh run env2</code> (Original) / <code>bash run.sh run-clean env2</code> (Clean)</div>
+
+<div class="step" style="margin-bottom:12px">
+  <div class="step-header">
+    <span class="step-num">Step CV</span>
+    <span class="step-name">10-Fold CV</span>
+    <span class="step-file">Step_CV.py</span>
+    <span class="tag tag-purple" style="margin-top:4px">env2 전용</span>
+  </div>
+  <div class="step-body">
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">Input</div>
+        <div class="io-model">outputs[_clean]/pretrained_graph_encoder.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">env1에서 학습된 encoder (frozen)</div>
+        <br>
+        <div class="io-file">data[_clean]/train_graphs.pt</div>
+        <div class="io-file">data[_clean]/test_graphs.pt</div>
+        <div style="color:var(--muted);font-size:0.72rem">두 파일을 합쳐 전체 데이터 구성</div>
+        <div style="color:var(--muted);font-size:0.72rem">Original: 1,850개 / Clean: 1,639개</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">처리 1: 전체 Feature 추출</div>
+        <div class="io-data">all_data (전체) → encoder.encode() → X_feat (N, 32)</div>
+        <div style="color:var(--muted);font-size:0.72rem">한 번만 추출 후 fold 분할에 재사용</div>
+      </div>
+    </div>
+    <div class="io-row">
+      <div class="io-box">
+        <div class="io-label">처리 2: 10-Fold Outer CV</div>
+        <div class="io-data">StratifiedKFold(n=10, seed=42)</div>
+        <div style="color:var(--muted);font-size:0.72rem">각 fold마다:</div>
+        <div style="color:var(--muted);font-size:0.72rem">  ① 5-fold inner OOF stacking (RF/ET/HistGB/XGB)</div>
+        <div style="color:var(--muted);font-size:0.72rem">  ② LR meta-learner 재학습</div>
+        <div style="color:var(--muted);font-size:0.72rem">  ③ OOF MCC 최적 threshold 탐색</div>
+        <div style="color:var(--muted);font-size:0.72rem">  ④ test fold 평가 (AUC, MCC, F1 등)</div>
+      </div>
+      <div class="io-arrow">→</div>
+      <div class="io-box">
+        <div class="io-label">Output → outputs_cv[_clean]/</div>
+        <div class="io-result">results_cv.csv</div>
+        <div style="color:var(--muted);font-size:0.72rem">fold_1 ~ fold_10 개별 결과</div>
+        <div style="color:var(--muted);font-size:0.72rem">DGUDILI_2026: 10-fold 평균</div>
+        <div style="color:var(--muted);font-size:0.72rem">DGUDILI_2026_std: 표준편차</div>
+        <br>
+        <div style="color:var(--muted);font-size:0.72rem">콘솔 출력: fold별 AUC, MCC, F1</div>
+      </div>
+    </div>
+    <div class="note">
+      <strong>편향 주의:</strong> encoder는 원래 train_graphs.pt(non-DILIrank)로만 학습됨.
+      CV에서 해당 train 샘플이 test fold가 될 때 → encoder가 이미 그 샘플을 학습에 활용 → 경미한 낙관 편향.
+      DILIrank(test_graphs.pt) 샘플은 encoder 학습 미포함 → 편향 없음.
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 6: StackDILI 파이프라인
+     ════════════════════════════════════════════════════════ -->
+<h2>6. StackDILI — 비교 모델 파이프라인</h2>
+
+<div class="card-grid">
+  <div class="card">
+    <span class="env-label stackdili">StackDILI (논문 목표값)</span>
+    <h3>env1에서의 비교 방식</h3>
+    <p>Step3_stacking.py 내부에 하드코딩된 고정값으로 비교:</p>
+    <div class="io-box" style="margin:10px 0">
+      <div class="io-label">Step3 내 baseline 딕셔너리</div>
+      <div class="io-data">AUC: 0.9736 | MCC: 0.8304 | F1: 0.9010</div>
+      <div class="io-data">ACC: 0.9159 | Precision: 0.8650</div>
+      <div class="io-data">Sensitivity: 0.9402 | Specificity: 0.8993</div>
+    </div>
+    <div class="note">실제 StackDILI 모델을 돌리지 않음. 논문 결과값과 직접 비교.</div>
+  </div>
+  <div class="card">
+    <span class="env-label stackdili">StackDILI CV 평가</span>
+    <h3>env2에서의 별도 실행</h3>
+    <p><code>compute_stackdili_cv_baseline.py</code>로 StackDILI를 직접 10-Fold CV:</p>
+    <ul style="margin:10px 0">
+      <li>GA 선택 피처 (<code>Feature/Feature.csv</code>) 기준</li>
+      <li>사전 학습된 base model 파일 (<code>Code/Model/best_model_*.pkl</code>) 로드</li>
+      <li>각 fold에서 base models + stacking meta 재학습</li>
+      <li>출력: <code>outputs_cv[_clean]/stackdili_baseline.json</code></li>
+    </ul>
+    <div class="warn">Code/Model/ 디렉토리 (pkl 파일들)이 없으면 실행 불가. StackDILI 원본 코드에서 학습된 모델 파일 필요.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>StackDILI 파이프라인 구조 (개념)</h3>
+  <table>
+    <tr><th>단계</th><th>내용</th><th>Input</th><th>Output</th></tr>
+    <tr>
+      <td>피처 선택</td>
+      <td>Genetic Algorithm으로 FP 피처 선택</td>
+      <td>Dataset_feature.csv (전체 ~425 dim FP)</td>
+      <td>Feature/Feature.csv (GA 선택 피처 subset)</td>
+    </tr>
+    <tr>
+      <td>Base 학습</td>
+      <td>RF / ET / HistGB / XGB 각각 학습</td>
+      <td>GA 선택 FP (N_train, GA_dim)</td>
+      <td>Code/Model/best_model_*.pkl</td>
+    </tr>
+    <tr>
+      <td>Stacking</td>
+      <td>5-fold OOF → LR meta classifier</td>
+      <td>OOF 예측 확률 (N_train, 4)</td>
+      <td>Code/Model/best_model_stacking.pkl</td>
+    </tr>
+    <tr>
+      <td>예측 (env1)</td>
+      <td>Test 세트 최종 예측</td>
+      <td>GA FP (452, GA_dim)</td>
+      <td>AUC 0.9736 등 (논문 결과)</td>
+    </tr>
+    <tr>
+      <td>예측 (env2 CV)</td>
+      <td>10-Fold CV 재평가</td>
+      <td>전체 데이터 (1,850개)</td>
+      <td>stackdili_baseline.json</td>
+    </tr>
+  </table>
+  <div class="note">StackDILI는 딥러닝 없음. 순수 FP + GA 피처 선택 + Stacking 앙상블. DGUDILI_2026은 딥러닝 Encoder로 32-dim 표현을 학습한 뒤 동일한 Stacking 구조를 사용.</div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 7: 전체 실행 명령 vs 결과 매핑
+     ════════════════════════════════════════════════════════ -->
+<h2>7. 실행 명령 → 결과 파일 매핑</h2>
+
+<table>
+  <tr>
+    <th>명령어</th>
+    <th>데이터</th>
+    <th>환경</th>
+    <th>실행 스크립트</th>
+    <th>결과 파일</th>
+  </tr>
+  <tr>
+    <td><code>bash run.sh run</code></td>
+    <td><span class="tag tag-green">Original</span></td>
+    <td><span class="tag tag-blue">env1</span></td>
+    <td>Step1 → Step2 → Step3</td>
+    <td><code>outputs/results.csv</code></td>
+  </tr>
+  <tr>
+    <td><code>bash run.sh run env2</code></td>
+    <td><span class="tag tag-green">Original</span></td>
+    <td><span class="tag tag-purple">env2</span></td>
+    <td>Step_CV.py (env1 encoder 재사용)</td>
+    <td><code>outputs_cv/results_cv.csv</code></td>
+  </tr>
+  <tr>
+    <td><code>bash run.sh run-clean</code></td>
+    <td><span class="tag tag-orange">Clean</span></td>
+    <td><span class="tag tag-blue">env1</span></td>
+    <td>make_clean_data → Step1 → Step2 → Step3</td>
+    <td><code>outputs_clean/results.csv</code></td>
+  </tr>
+  <tr>
+    <td><code>bash run.sh run-clean env2</code></td>
+    <td><span class="tag tag-orange">Clean</span></td>
+    <td><span class="tag tag-purple">env2</span></td>
+    <td>make_clean_data → Step_CV.py (env1-clean encoder 재사용)</td>
+    <td><code>outputs_cv_clean/results_cv.csv</code></td>
+  </tr>
+  <tr>
+    <td><code>python compute_stackdili_cv_baseline.py</code></td>
+    <td><span class="tag tag-green">Original</span></td>
+    <td><span class="tag tag-purple">env2</span></td>
+    <td>StackDILI 10-Fold CV</td>
+    <td><code>outputs_cv/stackdili_baseline.json</code></td>
+  </tr>
+  <tr>
+    <td><code>USE_CLEAN_DATA=1 python compute_stackdili_cv_baseline.py</code></td>
+    <td><span class="tag tag-orange">Clean</span></td>
+    <td><span class="tag tag-purple">env2</span></td>
+    <td>StackDILI 10-Fold CV (Clean)</td>
+    <td><code>outputs_cv_clean/stackdili_baseline.json</code></td>
+  </tr>
+</table>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 8: 디렉토리 구조
+     ════════════════════════════════════════════════════════ -->
+<h2>8. 디렉토리 구조 — 환경별 Input/Output 경로</h2>
+
+<div class="model-arch">Origin_StackDILI/
+├── Data/
+│   ├── Dataset.csv                     ← 원본 전체 데이터 (SMILES, Label, ref)
+│   └── Dataset_clean.csv               ← run-clean 후 생성 (train 중복 211개 제거)
+│
+├── Code/
+│   ├── Dataset_feature.csv             ← FP 피처 (~425 dim)
+│   └── Dataset_feature_clean.csv       ← run-clean 후 생성
+│
+├── Feature/
+│   └── Feature.csv                     ← StackDILI GA 선택 피처 (CV 평가용)
+│
+├── make_clean_data.py                  ← [Step 0] Clean 데이터 생성
+├── compute_stackdili_cv_baseline.py    ← StackDILI 10-Fold CV 평가
+├── run.sh                              ← Docker 실행 진입점
+│
+└── DGUDILI_2026/
+    ├── src/                            ← 소스 코드
+    │   ├── config.py                   ← 경로/하이퍼파라미터 (USE_CLEAN_DATA 환경변수 참조)
+    │   ├── Step1_preprocess.py         ← [Step 1] FP + Graph + MACCS 전처리
+    │   ├── Step2_pretrain.py           ← [Step 2] GraphMACCSEncoder 학습
+    │   ├── Step3_stacking.py           ← [Step 3] Feature 추출 + Stacking (env1)
+    │   ├── Step_CV.py                  ← [Step CV] 10-Fold CV (env2)
+    │   ├── model.py                    ← GraphMACCSEncoder 아키텍처
+    │   ├── graph_utils.py              ← smiles_to_pyg, get_maccs
+    │   ├── differential_attention.py   ← DifferentialCrossAttention
+    │   └── utils.py                    ← set_seed, load_dataset
+    │
+    ├── data/                           ← [env1 Original] Step1 출력
+    │   ├── train_graphs.pt             ← 1,398개 분자 (PyG + MACCS + label + SMILES)
+    │   ├── test_graphs.pt              ← 452개
+    │   ├── graph_train_tokens_42.pt    ← ChemBERTa 토크나이징 캐시
+    │   ├── graph_val_tokens_42.pt
+    │   ├── fp_full_train/test.npy      ← StandardScaled FP
+    │   ├── y_train/test.npy            ← 레이블
+    │   ├── smiles_train/test.npy
+    │   └── scalers.pkl
+    │
+    ├── data_clean/                     ← [env1 Clean] Step1 출력 (train 1,187개)
+    │   └── (동일 구조)
+    │
+    ├── outputs/                        ← [env1 Original] Step2/Step3 출력
+    │   ├── pretrained_graph_encoder.pt ← val_AUC 최고점 체크포인트
+    │   └── results.csv                 ← DGUDILI vs StackDILI 비교표
+    │
+    ├── outputs_clean/                  ← [env1 Clean] Step2/Step3 출력
+    │   └── (동일 구조)
+    │
+    ├── outputs_cv/                     ← [env2 Original] Step_CV 출력
+    │   ├── results_cv.csv              ← 10-fold 개별 + 평균 + 표준편차
+    │   └── stackdili_baseline.json     ← StackDILI CV 결과 (별도 실행 시)
+    │
+    └── outputs_cv_clean/               ← [env2 Clean] Step_CV 출력
+        └── (동일 구조)
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 9: env2 Encoder 재사용 편향 분석
+     ════════════════════════════════════════════════════════ -->
+<h2>9. env2에서 env1 Encoder 재사용 — 편향 분석</h2>
+
+<div class="card">
+  <h3>왜 편향이 생기는가</h3>
+  <p>env2 CV는 전체 데이터(train + test)를 10-fold로 나누지만, encoder는 이미 <strong>non-DILIrank 샘플(원래 train)</strong>을 학습에 사용한 상태입니다. 그 샘플들이 CV의 test fold로 들어올 때 encoder가 이미 "본" 데이터를 평가하게 됩니다.</p>
+
+  <div class="model-arch" style="font-size:0.8rem;line-height:1.9">env1 encoder 학습
+  → train_graphs.pt (non-DILIrank 1,398개) 로 BCELoss 최적화
+
+env2 CV
+  → 전체 1,850개 (train 1,398 + test 452)를 10-fold 분할
+  → encoder는 이미 1,398개를 "본" 상태로 feature 추출
+  → 해당 샘플이 test fold가 될 때 → 낙관적 평가 편향</div>
+
+  <h3 style="margin-top:18px">샘플별 편향 여부</h3>
+  <table>
+    <tr><th>샘플 종류</th><th>encoder 학습 포함</th><th>env2 test fold 시</th><th>영향</th></tr>
+    <tr>
+      <td>non-DILIrank (1,398개)</td>
+      <td><span class="tag tag-red">포함됨</span></td>
+      <td style="color:var(--red)">낙관적 편향 있음</td>
+      <td>encoder가 해당 샘플 이미 학습 → feature가 과도하게 discriminative할 수 있음</td>
+    </tr>
+    <tr>
+      <td>DILIrank (452개)</td>
+      <td><span class="tag tag-green">미포함</span></td>
+      <td style="color:var(--green)">편향 없음, 공정한 평가</td>
+      <td>encoder 학습에 전혀 사용되지 않음 → 독립적 평가</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>왜 Nested CV(이상적 방법)를 쓰지 않는가</h3>
+  <p>편향을 완전히 제거하려면 각 fold마다 encoder를 처음부터 재학습하는 <strong>Nested CV</strong>가 필요합니다.</p>
+
+  <div class="card-grid" style="margin-top:12px">
+    <div class="card" style="border-color:#fca5a5">
+      <h4>Nested CV (이상적)</h4>
+      <div class="model-arch" style="font-size:0.78rem;line-height:1.7">10 outer folds × encoder 재학습
+= 10 × 200 epochs × GraphMACCSEncoder
+= 실험 불가 수준의 계산 비용</div>
+      <p style="color:var(--muted);font-size:0.8rem;margin-top:8px">완전히 공정하지만 현실적으로 실행 불가.</p>
+    </div>
+    <div class="card" style="border-color:#86efac">
+      <h4>현재 방식 (실용적 타협)</h4>
+      <div class="model-arch" style="font-size:0.78rem;line-height:1.7">env1 encoder 1회 학습 (frozen)
++ env2 에서 stacking만 fold별 재학습
+= 빠르고 합리적인 근사</div>
+      <p style="color:var(--muted);font-size:0.8rem;margin-top:8px">편향이 제한적인 이유:</p>
+      <ul style="color:var(--muted);font-size:0.8rem">
+        <li>encoder frozen → stacking만 재학습</li>
+        <li>val_AUC early stopping으로 train set 과적합 억제</li>
+        <li>encoder 파라미터 수가 상대적으로 작음 (~수백만)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>env2 결과 해석 방법</h3>
+  <table>
+    <tr><th>평가 목적</th><th>신뢰도</th><th>근거</th></tr>
+    <tr>
+      <td>DILIrank 샘플에 대한 일반화</td>
+      <td><span class="tag tag-green">높음</span></td>
+      <td>encoder 학습에 미포함 → 완전히 독립적</td>
+    </tr>
+    <tr>
+      <td>non-DILIrank 샘플에 대한 일반화</td>
+      <td><span class="tag tag-orange">주의 필요</span></td>
+      <td>encoder가 이미 해당 샘플 학습 → 경미한 낙관 편향</td>
+    </tr>
+    <tr>
+      <td>Stacking 레이어 안정성 (분산)</td>
+      <td><span class="tag tag-blue">유효</span></td>
+      <td>fold별 stacking 재학습 → 평균±표준편차 의미 있음</td>
+    </tr>
+    <tr>
+      <td>StackDILI와 공정 비교</td>
+      <td><span class="tag tag-red">env1 사용 권장</span></td>
+      <td>env2 수치는 편향으로 인해 과대평가 가능성</td>
+    </tr>
+  </table>
+  <div class="warn" style="margin-top:12px">
+    <strong>논문 작성 시 권장:</strong> 주요 성능은 <strong>env1 (DILIrank fixed split)</strong> 기준으로 보고하고, env2는 "모델 안정성 확인" 용도로 보조 기재. env2 수치 인용 시 encoder 재사용 편향이 있음을 명시.
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 10: 환경 선택 가이드
+     ════════════════════════════════════════════════════════ -->
+<h2>10. 환경 선택 가이드</h2>
+
+<table>
+  <tr><th>목적</th><th>권장 환경</th><th>이유</th></tr>
+  <tr>
+    <td>StackDILI 논문과 공정 비교</td>
+    <td><span class="tag tag-blue">env1</span> <span class="tag tag-green">Original</span></td>
+    <td>동일 train/test 분할 조건</td>
+  </tr>
+  <tr>
+    <td>모델 일반화 성능 측정</td>
+    <td><span class="tag tag-purple">env2</span></td>
+    <td>단일 split 분산 제거, 평균±표준편차 측정</td>
+  </tr>
+  <tr>
+    <td>논문 제출 / 엄격한 평가</td>
+    <td><span class="tag tag-orange">Clean</span></td>
+    <td>데이터 누출 없는 독립 평가</td>
+  </tr>
+  <tr>
+    <td>빠른 실험 / 디버깅</td>
+    <td><span class="tag tag-blue">env1</span> <span class="tag tag-green">Original</span></td>
+    <td>가장 빠름, StackDILI 즉시 비교 가능</td>
+  </tr>
+  <tr>
+    <td>분포 이동 완화 효과 측정</td>
+    <td><span class="tag tag-purple">env2</span> <span class="tag tag-green">Original</span></td>
+    <td>DILIrank 샘플도 train fold로 사용 → 이동 완화</td>
+  </tr>
+  <tr>
+    <td>가장 보수적인 공정 평가</td>
+    <td><span class="tag tag-purple">env2</span> <span class="tag tag-orange">Clean</span></td>
+    <td>중복 제거 + CV → 이상적인 학술 평가 조건</td>
+  </tr>
+</table>
+
+<p style="color:var(--muted);font-size:0.78rem;margin-top:24px;text-align:center">
+  생성일: 2026-04-10 &nbsp;|&nbsp; DGUDILI 2026 Branch: DiffDILI_v2
+</p>
+
+</body>
+</html>
