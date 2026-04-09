@@ -165,7 +165,7 @@ class DifferentialCrossAttention(nn.Module):
 
         # ── attn_weights for XAI (head average) ──────────────────────────────
         with torch.no_grad():
-            self.multihead_scores = scores.detach()  # <--- [추가] 기존 파이프라인 몰래 4차원 데이터 저장!
+            self.multihead_scores = scores.detach()  # (B, h, N_q, N_kv) — Step5_mHeadHeatmap용
             attn_weights = scores.mean(dim=1)  # (B, N_q, N_kv)
 
         return out, attn_weights

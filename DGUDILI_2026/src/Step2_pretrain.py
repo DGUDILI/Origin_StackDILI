@@ -175,7 +175,6 @@ print(f"Parameters: trainable={trainable:,} / total={total:,}  |  Device: {devic
 n_layers = len(encoder.chemberta.encoder.layer)
 chem_last_ids = {id(p) for p in encoder.chemberta.encoder.layer[n_layers - 1].parameters()}
 chem_all_ids  = {id(p) for p in encoder.chemberta.parameters()}
-other_ids     = {id(p) for p in encoder.parameters()} - chem_all_ids
 
 optimizer = torch.optim.AdamW(
     [
@@ -236,7 +235,7 @@ for epoch in range(1, EPOCHS + 1):
     epoch_loss /= len(train_ds)
 
     val_logits, val_proba = run_inference(encoder, val_dl)
-    val_loss = criterion(val_logits, y_val_t).item()
+    val_loss = criterion(val_logits.to(device), y_val_t.to(device)).item()
     val_auc  = roc_auc_score(y_val_np, val_proba)
 
     scheduler.step(val_auc)

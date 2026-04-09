@@ -24,8 +24,10 @@ Step 3:   Feature 추출 + Stacking OOF (Stage 2)
    │                                           (B, 64)       │
    ├─────────────────────────────────────────────────────────┤
    │  RDKit mol → 43-dim atom features                       │
+   │  + bond features (9-dim: single/double/triple/aromatic/ │
+   │    ring/conjugated/stereo×3) → edge_proj(9, 64)         │
    │  → atom_proj Linear(43, 64)                             │
-   │  → SAGEConv(64, 64) × 2 + BatchNorm + ReLU             │
+   │  → GINEConv(64, 64, edge_dim=64) × 2 + BN + ReLU       │
    │  → to_dense_batch → (B, 100, 64) + pad_mask            │
    │  → node_proj Linear(64, 64)  → node_q (B, 100, 64)     │
    ├─────────────────────────────────────────────────────────┤
@@ -84,7 +86,8 @@ Step 3:   Feature 추출 + Stacking OOF (Stage 2)
 | ChemBERTa | (B, 256) token ids | (B, 384) | AutoModel CLS |
 | chem_proj | (B, 384) | (B, 64) | LN → Linear |
 | atom_proj | (N_total, 43) | (N_total, 64) | Linear |
-| SAGEConv×2 | (N_total, 64) | (N_total, 64) | SAGEConv + BN + ReLU |
+| edge_proj | (E, 9) | (E, 64) | Linear |
+| GINEConv×2 | (N_total, 64) + edge(E,64) | (N_total, 64) | GINEConv + BN + ReLU |
 | to_dense_batch | (N_total, 64) | (B, 100, 64) | PyG dense pad |
 | node_proj | (B, 100, 64) | (B, 100, 64) | Linear → node_q |
 | MACCS embed | (B, 167) int | (B, 167, 64) | Embedding(167, 64) |
@@ -170,10 +173,20 @@ attn = encoder.get_attn_weights()  # (1, MAX_ATOMS, 167)
 
 ---
 
-## 실험 결과 (DILIrank test, N=452)
+## 실험 결과
+
+### env1 — Fixed Split (DILIrank test, N=452)
 
 | 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
 |------|-----|-----|----|-------------|-------------|
 | StackDILI (목표) | **0.9736** | **0.8304** | **0.9010** | **0.9402** | **0.8993** |
-| **GraphMACCSEncoder** | **0.9224** | **0.7270** | **0.8426** | 0.9022 | 0.8358 |
-| vs 목표 | -0.0512 | -0.1034 | -0.0584 | -0.0380 | -0.0635 |
+| SAGEConv + LR | 0.8426 | 0.5275 | 0.7102 | 0.6793 | 0.8396 |
+| **GINEConv + LR** | **0.8808** | **0.5776** | **0.7565** | 0.7935 | 0.7910 |
+| vs 목표 (GINEConv) | -0.0928 | -0.2528 | -0.1445 | -0.1467 | -0.1083 |
+
+### env2 — 10-Fold CV (전체 N=1,850)
+
+| 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
+|------|-----|-----|----|-------------|-------------|
+| SAGEConv + LR | 0.8909 ±0.030 | 0.6366 ±0.072 | 0.8230 ±0.037 | 0.831 | 0.802 |
+| **GINEConv + LR** | **0.9558 ±0.015** | **0.8080 ±0.051** | **0.9068 ±0.024** | 0.908 | 0.900 |

@@ -1,6 +1,6 @@
 # DGUDILI 2026 — 환경 구성 및 실행 가이드
 
-> 모델: **GraphMACCSEncoder** (GraphSAGE + MACCS DifferentialCrossAttention + ChemBERTa)
+> 모델: **GraphMACCSEncoder** (GINEConv + bond features 9-dim + MACCS DifferentialCrossAttention + ChemBERTa)
 
 ---
 
@@ -9,12 +9,13 @@
 ```
 SMILES
   ├─→ ChemBERTa-77M-MLM (last-layer fine-tune) → CLS (B, 384) → chem_feat (B, 64)
-  ├─→ RDKit mol → atom_features (43-dim) → SAGEConv×2 (hidden=64)
+  ├─→ RDKit mol → atom_features (43-dim) + bond_features (9-dim)
+  │   → atom_proj + edge_proj → GINEConv×2 (edge_attr 활용, hidden=64)
   │   → to_dense_batch → node_q (B, 100, 64)
-  └─→ MACCSkeys (B, 167) → Embedding(167, 64) → maccs_kv (B, 167, 64)
+  └─→ MACCSkeys (B, 167) → Embedding(167, 64) → binary gate → maccs_kv (B, 167, 64)
                         ↓
       DifferentialCrossAttention (Q=node_q, K/V=maccs_kv)
-      inactive bits masked -1e9 | λ.clamp(min=1e-4)
+      inactive bits masked -1e9 | λ.clamp(min=1e-4, max=2.0)
                         ↓
       masked_mean_pool → graph_feat (B, 64)
       concat([chem_feat, graph_feat]) → fuse_proj → MLP → 32-dim
@@ -297,13 +298,20 @@ LR_OTHER       = 3e-4   # GraphSAGE + DiffAttn lr
 
 ## 실험 결과
 
-### env1 — Fixed Split (Test: DILIrank N=452, GraphMACCSEncoder)
+### env1 — Fixed Split (Test: DILIrank N=452)
 
-| 데이터 | AUC | MCC | F1 | Sensitivity | Specificity |
+| 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
 |---|---|---|---|---|---|
-| Original | 0.9224 | 0.7270 | 0.8426 | 0.9022 | 0.8358 |
+| StackDILI (목표) | 0.9736 | 0.8304 | 0.9010 | 0.9402 | 0.8993 |
+| SAGEConv + LR | 0.8426 | 0.5275 | 0.7102 | 0.6793 | 0.8396 |
+| **GINEConv + LR** | **0.8808** | **0.5776** | **0.7565** | 0.7935 | 0.7910 |
 
-> StackDILI 목표: AUC 0.9736, MCC 0.8304, F1 0.9010
+### env2 — 10-Fold CV (전체 N=1,850)
+
+| 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
+|---|---|---|---|---|---|
+| SAGEConv + LR | 0.8909 ±0.030 | 0.6366 ±0.072 | 0.8230 ±0.037 | 0.831 | 0.802 |
+| **GINEConv + LR** | **0.9558 ±0.015** | **0.8080 ±0.051** | **0.9068 ±0.024** | 0.908 | 0.900 |
 
 ### 참고: 이전 모델 결과 (E2E_MHAResidualEncoder)
 

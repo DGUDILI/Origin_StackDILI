@@ -6,13 +6,14 @@ GraphMACCSEncoder: GraphSAGE + MACCS DifferentialCrossAttention + ChemBERTa 융�
 
 ### Architecture Evolution
 
-| 버전 | 모델 | AUC | MCC | 비고 |
+| 버전 | 모델 | AUC (env1) | MCC (env1) | 비고 |
 |------|------|-----|-----|------|
 | StackDILI *(baseline)* | GA + Stacking | 0.9736 | 0.8304 | 목표 |
 | CrossAttentionEncoder | CLS + FP CrossAttn | 0.7313 | 0.3045 | Early stop leakage |
 | FTV6StyleEncoder | FP soft projection | 0.9196 | 0.6682 | val_AUC early stop |
 | E2E_FTV6StyleEncoder | ChemBERTa fine-tune | 0.9219 | 0.7270 | ChemBERTa unfrozen |
-| **GraphMACCSEncoder** | **GraphSAGE + DiffAttn** | **0.9224** | **0.7270** | **현재** |
+| GraphMACCSEncoder (SAGEConv) | GraphSAGE + DiffAttn | 0.8426 | 0.5275 | Phase 1~2 |
+| **GraphMACCSEncoder (GINEConv)** | **GINEConv + edge_attr 9-dim** | **0.8808** | **0.5776** | **현재** |
 
 ---
 
@@ -43,16 +44,18 @@ pip install numpy==1.26.4 scikit-learn==1.7.1 xgboost transformers pandas rdkit
 
 ---
 
-## 현재 파이프라인 — GraphMACCSEncoder
+## 현재 파이프라인 — GraphMACCSEncoder (GINEConv)
 
 ```
 SMILES
   ├─→ ChemBERTa (last-layer fine-tune) → CLS (B, 384) → chem_feat (B, 64)
-  ├─→ RDKit mol → 43-dim atom features → SAGEConv×2 → node_q (B, 100, 64)
-  └─→ MACCSkeys (B, 167) → Embedding → maccs_kv (B, 167, 64)
+  ├─→ RDKit mol → 43-dim atom features → atom_proj
+  │   + bond features (9-dim: single/double/triple/aromatic/ring/conjugated/stereo×3)
+  │   → GINEConv×2 (edge_attr 활용) → node_q (B, 100, 64)
+  └─→ MACCSkeys (B, 167) → Embedding → binary gate → maccs_kv (B, 167, 64)
                                   ↓
          DifferentialCrossAttention (Q=node_q, K/V=maccs_kv)
-         inactive bits masked -1e9 in attention scores
+         inactive bits masked -1e9 | λ.clamp(min=1e-4, max=2.0)
                                   ↓
          masked_mean_pool → graph_feat (B, 64)
          concat([chem_feat, graph_feat]) → fuse_proj → MLP → (B, 32)
@@ -138,8 +141,9 @@ clean 데이터 경로: `data_clean/`, `outputs_clean/` (`USE_CLEAN_DATA=1` 시 
 | D_MODEL | 64 | DiffAttn 내부 차원 |
 | NUM_HEADS | 4 | Differential attention 헤드 수 |
 | DROPOUT | 0.3 | MLP dropout |
-| SAGE_HIDDEN | 64 | SAGEConv hidden dim |
-| SAGE_LAYERS | 2 | GraphSAGE layer 수 |
+| SAGE_HIDDEN | 64 | GINEConv hidden dim |
+| SAGE_LAYERS | 2 | GINEConv layer 수 |
+| BOND_FEAT_DIM | 9 | get_bond_features() 출력 차원 |
 | MAX_ATOMS | 100 | to_dense_batch 패딩 기준 |
 | MACCS_DIM | 167 | MACCSkeys 차원 (bit 0 미사용, bits 1~166 유효) |
 | ATOM_FEAT_DIM | 43 | get_atom_features() 출력 차원 |
@@ -163,12 +167,22 @@ test  = data[data['ref'] == 'DILIrank']   # 452 samples  (pos=184, neg=268)
 
 ---
 
-## 실험 결과 (DILIrank test, N=452)
+## 실험 결과
+
+### env1 — Fixed Split (DILIrank test, N=452)
 
 | 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
 |------|-----|-----|----|-------------|-------------|
 | StackDILI (목표) | 0.9736 | 0.8304 | 0.9010 | 0.9402 | 0.8993 |
-| **GraphMACCSEncoder** | **0.9224** | **0.7270** | **0.8426** | 0.9022 | 0.8358 |
+| SAGEConv + LR | 0.8426 | 0.5275 | 0.7102 | 0.6793 | 0.8396 |
+| **GINEConv + LR** | **0.8808** | **0.5776** | **0.7565** | 0.7935 | 0.7910 |
+
+### env2 — 10-Fold CV (전체 N=1,850)
+
+| 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
+|------|-----|-----|----|-------------|-------------|
+| SAGEConv + LR | 0.8909 ±0.030 | 0.6366 ±0.072 | 0.8230 ±0.037 | 0.831 | 0.802 |
+| **GINEConv + LR** | **0.9558 ±0.015** | **0.8080 ±0.051** | **0.9068 ±0.024** | 0.908 | 0.900 |
 
 ---
 

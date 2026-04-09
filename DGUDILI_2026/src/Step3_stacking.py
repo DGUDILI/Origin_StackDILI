@@ -3,6 +3,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import sys
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from sklearn.ensemble import (
@@ -174,7 +175,6 @@ if __name__ == "__main__":
     tn, fp_, fn, tp  = confusion_matrix(y_test, final_pred).ravel()
 
     # ── 평가 ──────────────────────────────────────────────────────────────────
-    import pandas as pd
     dgudili = {
         "AUC":         roc_auc_score(y_test, final_proba),
         "MCC":         matthews_corrcoef(y_test, final_pred),
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     print("-" * W)
     print(f"{'vs StackDILI':25s}"        + "".join(f"{dgudili[c]-baseline[c]:>+10.4f}" for c in cols))
     print("=" * W)
-    print(f"\nPipeline: SMILES → GraphSAGE + MACCS DiffCrossAttn (d={D_MODEL}) → {K}-dim → Stacking")
+    print(f"\nPipeline: SMILES → GINEConv + MACCS DiffCrossAttn (d={D_MODEL}) → {K}-dim → Stacking (LR meta)")
 
     results_df = pd.DataFrame([baseline, dgudili], index=["StackDILI", "DGUDILI_2026"])
     csv_path   = os.path.join(OUT_DIR, "results.csv")

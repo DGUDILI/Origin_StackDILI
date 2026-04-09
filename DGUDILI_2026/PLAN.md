@@ -44,6 +44,8 @@ SMILES
   Stage 2: encode_out (B, 32)
          → Stacking OOF [RF / ET / HistGB / XGB → LR meta]
          → 최종 예측
+
+  ※ meta-model: ExtraTreesClassifier는 4-dim OOF에서 OOF MCC=1.0 과적합 확인 → LR 고정
 ```
 
 ---
@@ -52,10 +54,10 @@ SMILES
 
 | Phase | 주요 변경 | env1 AUC | env2 AUC |
 |---|---|---|---|
-| 베이스라인 | GraphMACCSEncoder (SAGEConv) | ~0.805 (clean) | 0.9152 |
+| 베이스라인 | GraphMACCSEncoder (SAGEConv + LR) | 0.8426 | 0.8909 ±0.030 |
 | Phase 1 | pos_weight + dropout연동 + lambda상한 + 로깅 | +0.04 | — |
 | Phase 2 | Binary Gate만 채택 (MLP/GraphNorm/LabelSmoothing 역효과) | 중립 | — |
-| **Phase 3** | **GINEConv + Edge Feature 9-dim** | **0.8286** | **0.9374** |
+| **Phase 3** | **GINEConv + Edge Feature 9-dim (+ Step2 device 버그 수정)** | **0.8808** | **0.9558 ±0.015** |
 
 ---
 
@@ -65,6 +67,7 @@ SMILES
 |---|---|---|
 | ChemBERTa 2-layer unfreeze | test AUC 하락 | 도메인 오버피팅. 1-layer가 적절한 regularization 역할 |
 | DANN/DAT (λ>0) | AUC 하락 | train/test 분포 차이가 signal quality shift. DANN이 유용한 DILIrank 신호 제거 |
+| ET meta | AUC 하락, Specificity 0.40 붕괴 | 4-dim OOF 입력에서 OOF MCC=1.0 과적합. LR이 유일한 적합 meta-learner |
 
 ---
 
@@ -96,7 +99,7 @@ SMILES
 | 2-E | `Step2_pretrain.py` | Label Smoothing `smoothing=0.05` | ❌ 건너뜀 (pos_weight와 충돌 추정) |
 
 **결론: Phase 2에서 Binary Gate(2-D)만 유지. 나머지는 소규모 clean 데이터에서 역효과.**
-**현재 베이스라인: Phase 1 + Binary Gate = env1 AUC ~0.805**
+**현재 베이스라인 (Phase 2 이후 SAGEConv): env1 AUC 0.8426 / env2 AUC 0.8909**
 
 ### 2-B MLP 변경 내용
 ```python
@@ -134,9 +137,10 @@ self.sage_bns = nn.ModuleList([GraphNorm(sage_hidden) for _ in range(sage_layers
 
 | Step | 파일 | 내용 | 결과 |
 |---|---|---|---|
-| 3-A | `graph_utils.py` + `model.py` | Edge Feature 9-dim + `SAGEConv → GINEConv` | ✅ env1 +0.024 / env2 +0.022 |
+| 3-A | `graph_utils.py` + `model.py` | Edge Feature 9-dim + `SAGEConv → GINEConv` | ✅ env1 +0.038 / env2 +0.065 |
+| 3-B | `Step2_pretrain.py:239` | `val_logits.to(device)` — GPU/CPU 불일치 버그 수정 | ✅ 학습 안정화 |
 
-**현재 베이스라인: env1 AUC 0.8286 / env2 AUC 0.9374**
+**현재 베이스라인: env1 AUC 0.8808 / env2 AUC 0.9558 ±0.015 (MCC 0.8080)**
 
 ### 3-A 추가할 bond feature (9-dim)
 ```python
