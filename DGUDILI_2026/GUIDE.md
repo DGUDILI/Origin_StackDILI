@@ -141,16 +141,22 @@ clean 데이터 경로: `data_clean/`, `outputs_clean/` (`USE_CLEAN_DATA=1` 시 
 | D_MODEL | 64 | DiffAttn 내부 차원 |
 | NUM_HEADS | 4 | Differential attention 헤드 수 |
 | DROPOUT | 0.3 | MLP dropout |
-| SAGE_HIDDEN | 64 | GINEConv hidden dim |
-| SAGE_LAYERS | 2 | GINEConv layer 수 |
+| GINE_HIDDEN | 64 | GINEConv hidden dim |
+| GINE_LAYERS | 2 | GINEConv layer 수 |
 | BOND_FEAT_DIM | 9 | get_bond_features() 출력 차원 |
 | MAX_ATOMS | 100 | to_dense_batch 패딩 기준 |
 | MACCS_DIM | 167 | MACCSkeys 차원 (bit 0 미사용, bits 1~166 유효) |
 | ATOM_FEAT_DIM | 43 | get_atom_features() 출력 차원 |
 | LR_CHEM | 1e-4 | ChemBERTa last-layer lr |
-| LR_OTHER | 3e-4 | GraphSAGE + DiffAttn lr |
+| LR_OTHER | 3e-4 | GINEConv + DiffAttn lr |
+| WEIGHT_DECAY | 1e-4 | AdamW weight decay |
+| BATCH_SIZE | 16 | 미니배치 크기 |
+| MAX_LENGTH | 256 | ChemBERTa 토크나이저 최대 길이 |
 | EPOCHS | 200 | 최대 epoch |
 | PATIENCE | 30 | Early stopping patience |
+| SCHED_PATIENCE | 8 | ReduceLROnPlateau patience |
+| SCHED_FACTOR | 0.5 | LR 감소 비율 |
+| SCHED_MIN_LR | 1e-5 | 최소 lr 하한 |
 | **early_stop** | **val_AUC (mode=max)** | **val_loss는 분포 이동으로 부적합** |
 
 ---
@@ -171,18 +177,24 @@ test  = data[data['ref'] == 'DILIrank']   # 452 samples  (pos=184, neg=268)
 
 ### env1 — Fixed Split (DILIrank test, N=452)
 
-| 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
-|------|-----|-----|----|-------------|-------------|
-| StackDILI (목표) | 0.9736 | 0.8304 | 0.9010 | 0.9402 | 0.8993 |
-| SAGEConv + LR | 0.8426 | 0.5275 | 0.7102 | 0.6793 | 0.8396 |
-| **GINEConv + LR** | **0.8808** | **0.5776** | **0.7565** | 0.7935 | 0.7910 |
+| 모델 | 데이터 | AUC | MCC | F1 | Sensitivity | Specificity |
+|------|--------|-----|-----|----|-------------|-------------|
+| StackDILI (목표) | original | 0.9736 | 0.8304 | 0.9010 | 0.9402 | 0.8993 |
+| SAGEConv + LR | original | 0.8426 | 0.5275 | 0.7102 | 0.6793 | 0.8396 |
+| GINEConv + LR | original | 0.8808 | 0.5776 | 0.7565 | 0.7935 | 0.7910 |
+| **GINEConv + LR** | **clean** | **0.8286** | **0.5318** | **0.7358** | **0.8098** | **0.7313** |
 
-### env2 — 10-Fold CV (전체 N=1,850)
+> clean: train 중복 211개 제거 (train 1398→1187), test 452 유지
 
-| 모델 | AUC | MCC | F1 | Sensitivity | Specificity |
-|------|-----|-----|----|-------------|-------------|
-| SAGEConv + LR | 0.8909 ±0.030 | 0.6366 ±0.072 | 0.8230 ±0.037 | 0.831 | 0.802 |
-| **GINEConv + LR** | **0.9558 ±0.015** | **0.8080 ±0.051** | **0.9068 ±0.024** | 0.908 | 0.900 |
+### env2 — 10-Fold CV
+
+| 모델 | 데이터 | N | AUC | MCC | F1 | Sensitivity | Specificity |
+|------|--------|---|-----|-----|----|-------------|-------------|
+| SAGEConv + LR | original | 1,850 | 0.8909 ±0.030 | 0.6366 ±0.072 | 0.8230 ±0.037 | 0.831 ±0.064 | 0.802 ±0.064 |
+| GINEConv + LR | original | 1,850 | 0.9558 ±0.015 | 0.8080 ±0.051 | 0.9068 ±0.024 | 0.908 ±0.025 | 0.900 ±0.041 |
+| **GINEConv + LR** | **clean** | **1,639** | **0.9374 ±0.014** | **0.7573 ±0.045** | **0.8823 ±0.021** | **0.895 ±0.031** | **0.860 ±0.043** |
+
+> clean env2: 중복 제거 후 1,639 (train 1187 + test 452) 전체로 10-fold CV
 
 ---
 
