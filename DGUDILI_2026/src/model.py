@@ -16,8 +16,8 @@ class GraphMACCSEncoder(nn.Module):
              → LayerNorm → Linear(384, d_model) → chem_feat (B, d_model)  [residual]
 
       SMILES → RDKit mol → atom_features (N_total, atom_feat_dim)
-             → atom_proj Linear → GINEConv × sage_layers (edge_attr 9-dim 활용)
-             → to_dense_batch → (B, MAX_ATOMS, sage_hidden) + pad_mask
+             → atom_proj Linear → GINEConv × gine_layers (edge_attr 9-dim 활용)
+             → to_dense_batch → (B, MAX_ATOMS, gine_hidden) + pad_mask
              → node_proj Linear → node_q (B, MAX_ATOMS, d_model)          [Query]
 
       SMILES → MACCSkeys (B, 167) binary
@@ -36,12 +36,13 @@ class GraphMACCSEncoder(nn.Module):
     def __init__(
         self,
         atom_feat_dim: int = 43,
+        bond_feat_dim: int = 9,
         maccs_dim: int = 167,
-        sage_hidden: int = 16,
-        sage_layers: int = 2,
+        gine_hidden: int = 64,
+        gine_layers: int = 2,
         d_model: int = 64,
         num_heads: int = 4,
-        k: int = 16,
+        k: int = 32,
         max_atoms: int = 100,
         dropout: float = 0.3,
         model_name: str = "DeepChem/ChemBERTa-77M-MLM",
@@ -51,7 +52,7 @@ class GraphMACCSEncoder(nn.Module):
         from differential_attention import DifferentialCrossAttention
 
         self.max_atoms   = max_atoms
-        self.sage_hidden = sage_hidden
+        self.gine_hidden = gine_hidden
         self.d_model     = d_model
         self.k           = k
         self._last_attn_weights: torch.Tensor | None = None
@@ -69,20 +70,19 @@ class GraphMACCSEncoder(nn.Module):
         self.chem_proj = nn.Linear(chem_in_dim, d_model)
 
         # ── GINE (Graph Isomorphism Network with Edge features) ───────────────
-        bond_feat_dim = 9  # get_bond_features() 출력 dim (graph_utils.BOND_FEAT_DIM)
-        self.atom_proj  = nn.Linear(atom_feat_dim, sage_hidden)
-        self.edge_proj  = nn.Linear(bond_feat_dim, sage_hidden)  # edge_attr → sage_hidden
-        self.sage_convs = nn.ModuleList()
-        self.sage_bns   = nn.ModuleList()
-        for _ in range(sage_layers):
+        self.atom_proj  = nn.Linear(atom_feat_dim, gine_hidden)
+        self.edge_proj  = nn.Linear(bond_feat_dim, gine_hidden)  # edge_attr → gine_hidden
+        self.gine_convs = nn.ModuleList()
+        self.gine_bns   = nn.ModuleList()
+        for _ in range(gine_layers):
             mlp = nn.Sequential(
-                nn.Linear(sage_hidden, sage_hidden),
+                nn.Linear(gine_hidden, gine_hidden),
                 nn.ReLU(),
-                nn.Linear(sage_hidden, sage_hidden),
+                nn.Linear(gine_hidden, gine_hidden),
             )
-            self.sage_convs.append(GINEConv(mlp, edge_dim=sage_hidden))
-            self.sage_bns.append(nn.BatchNorm1d(sage_hidden))
-        self.node_proj = nn.Linear(sage_hidden, d_model)
+            self.gine_convs.append(GINEConv(mlp, edge_dim=gine_hidden))
+            self.gine_bns.append(nn.BatchNorm1d(gine_hidden))
+        self.node_proj = nn.Linear(gine_hidden, d_model)
 
         # ── MACCS Identity Embedding ───────────────────────────────────────────
         # bit 인덱스(0~166) → d_model-dim 학습 벡터
@@ -130,18 +130,18 @@ class GraphMACCSEncoder(nn.Module):
         chem_feat = self.chem_proj(self.chem_norm(cls))        # (B, d_model)
 
         # ── GINE ──────────────────────────────────────────────────────────────
-        x          = self.atom_proj(graph_batch.x)             # (N_total, sage_hidden)
+        x          = self.atom_proj(graph_batch.x)             # (N_total, gine_hidden)
         edge_index = graph_batch.edge_index
-        edge_attr  = self.edge_proj(graph_batch.edge_attr)     # (E, sage_hidden)
-        for conv, bn in zip(self.sage_convs, self.sage_bns):
-            x = torch.relu(bn(conv(x, edge_index, edge_attr))) # (N_total, sage_hidden)
+        edge_attr  = self.edge_proj(graph_batch.edge_attr)     # (E, gine_hidden)
+        for conv, bn in zip(self.gine_convs, self.gine_bns):
+            x = torch.relu(bn(conv(x, edge_index, edge_attr))) # (N_total, gine_hidden)
 
         # to_dense_batch: variable nodes → padded dense tensor
         node_dense, pad_mask = to_dense_batch(
             x,
             graph_batch.batch,
             max_num_nodes=self.max_atoms,
-        )  # node_dense: (B, MAX_ATOMS, sage_hidden), pad_mask: (B, MAX_ATOMS) True=valid
+        )  # node_dense: (B, MAX_ATOMS, gine_hidden), pad_mask: (B, MAX_ATOMS) True=valid
 
         node_q = self.node_proj(node_dense)                    # (B, MAX_ATOMS, d_model)
 

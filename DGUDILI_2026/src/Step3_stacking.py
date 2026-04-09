@@ -5,7 +5,6 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader
 from sklearn.ensemble import (
     RandomForestClassifier, ExtraTreesClassifier,
     HistGradientBoostingClassifier,
@@ -18,7 +17,6 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, confusion_matrix,
 )
 from transformers import AutoTokenizer
-from torch_geometric.data import Batch as PyGBatch
 from xgboost import XGBClassifier
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,57 +25,10 @@ from config import (
     K, D_MODEL, NUM_HEADS, MODEL_NAME,
     BATCH_SIZE, MAX_LENGTH, SEED,
     DATA_DIR, OUT_DIR,
-    MACCS_DIM, MAX_ATOMS, SAGE_LAYERS, SAGE_HIDDEN, ATOM_FEAT_DIM,
+    MACCS_DIM, MAX_ATOMS, GINE_LAYERS, GINE_HIDDEN, ATOM_FEAT_DIM, BOND_FEAT_DIM,
 )
 from model import GraphMACCSEncoder
-
-
-def collate_fn(batch):
-    return {
-        "input_ids": torch.stack([b["input_ids"] for b in batch]),
-        "attn_mask": torch.stack([b["attn_mask"] for b in batch]),
-        "maccs":     torch.stack([b["maccs"] for b in batch]),
-        "graph":     PyGBatch.from_data_list([b["pyg_data"] for b in batch]),
-    }
-
-
-def extract_features(model, data_list, tokenizer, device):
-    # 토크나이징
-    smiles_list = [d["smiles"] for d in data_list]
-    enc = tokenizer(
-        smiles_list,
-        max_length=MAX_LENGTH,
-        padding="max_length",
-        truncation=True,
-        return_tensors="pt",
-    )
-
-    class _DS(torch.utils.data.Dataset):
-        def __init__(self, data_list, enc):
-            self.data = data_list
-            self.ids  = enc["input_ids"]
-            self.mask = enc["attention_mask"]
-        def __len__(self): return len(self.data)
-        def __getitem__(self, i):
-            return {
-                "input_ids": self.ids[i],
-                "attn_mask": self.mask[i],
-                "maccs":     self.data[i]["maccs"],
-                "pyg_data":  self.data[i]["pyg"],
-            }
-
-    ds = _DS(data_list, enc)
-    dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=False,
-                    num_workers=0, collate_fn=collate_fn)
-    feats = []
-    with torch.no_grad():
-        for batch in dl:
-            ids   = batch["input_ids"].to(device)
-            mask  = batch["attn_mask"].to(device)
-            maccs = batch["maccs"].to(device)
-            graph = batch["graph"].to(device)
-            feats.append(model.encode(ids, mask, maccs, graph).cpu().numpy())
-    return np.concatenate(feats, axis=0)
+from features import extract_features
 
 
 if __name__ == "__main__":
@@ -108,8 +59,9 @@ if __name__ == "__main__":
     encoder   = GraphMACCSEncoder(
         model_name=MODEL_NAME,
         atom_feat_dim=ATOM_FEAT_DIM,
-        sage_hidden=SAGE_HIDDEN,
-        sage_layers=SAGE_LAYERS,
+        bond_feat_dim=BOND_FEAT_DIM,
+        gine_hidden=GINE_HIDDEN,
+        gine_layers=GINE_LAYERS,
         maccs_dim=MACCS_DIM,
         d_model=D_MODEL,
         num_heads=NUM_HEADS,
@@ -157,6 +109,14 @@ if __name__ == "__main__":
             fold_test_preds.append(clf.predict_proba(X_test)[:, 1])
         test_probs[:, i] = np.mean(fold_test_preds, axis=0)
         print(f"  {name:8s}: OOF AUC={roc_auc_score(y_train, oof_probs[:, i]):.4f}")
+
+    # ── OOF vs Test probs 분포 확인 ──────────────────────────────────────────
+    print("\n[Distribution Check] OOF probs vs Test probs")
+    print(f"  {'':8s}  {'mean':>30s}  {'std':>30s}")
+    model_names = [name for name, _ in BASE_MODELS]
+    for i, name in enumerate(model_names):
+        print(f"  OOF  {name:6s}  mean={oof_probs[:, i].mean():.4f}  std={oof_probs[:, i].std():.4f}"
+              f"  |  test mean={test_probs[:, i].mean():.4f}  std={test_probs[:, i].std():.4f}")
 
     # ── Meta-model ────────────────────────────────────────────────────────────
     print("\n[Meta] LogisticRegression on OOF probs...")

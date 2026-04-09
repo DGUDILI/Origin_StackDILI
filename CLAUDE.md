@@ -80,7 +80,7 @@ outputs/
 
 **GraphMACCSEncoder (model.py):**
 - SMILES → ChemBERTa(last layer unfreeze, lr=1e-4) → CLS (B, 384) → LayerNorm → Linear → chem_feat (B, d_model)
-- SMILES → RDKit mol → 43-dim atom features → atom_proj → GINEConv×2 (edge_attr 9-dim, sage_hidden=64) → to_dense_batch → node_q (B, MAX_ATOMS, d_model)
+- SMILES → RDKit mol → 43-dim atom features → atom_proj → GINEConv×2 (edge_attr 9-dim, gine_hidden=64) → to_dense_batch → node_q (B, MAX_ATOMS, d_model)
 - SMILES → MACCSkeys (B, 167) → Embedding(167, d_model) → maccs_kv (B, 167, d_model); 비활성 bit: binary gate로 0벡터화
 - DifferentialCrossAttention(Q=node_q, K/V=maccs_kv) → attn_out (B, MAX_ATOMS, d_model)
 - masked_mean_pool → graph_feat (B, d_model) → concat([chem_feat, graph_feat]) → fuse_proj → MLP → encode_out (B, k=32)
@@ -96,7 +96,7 @@ outputs/
 
 **Key Hyperparameters (config.py):**
 - K=32, D_MODEL=64, NUM_HEADS=4, DROPOUT=0.3
-- SAGE_HIDDEN=64, SAGE_LAYERS=2, BOND_FEAT_DIM=9, MAX_ATOMS=100, MACCS_DIM=167, ATOM_FEAT_DIM=43
+- GINE_HIDDEN=64, GINE_LAYERS=2, BOND_FEAT_DIM=9, MAX_ATOMS=100, MACCS_DIM=167, ATOM_FEAT_DIM=43
 
 ## Recent Changes (2026-04-10)
 
