@@ -14,22 +14,21 @@ sys.path.insert(0, SRC_DIR)
 
 from config import (
     K, D_MODEL, NUM_HEADS, DROPOUT, MODEL_NAME,
-    MAX_LENGTH, MACCS_DIM, MAX_ATOMS, SAGE_LAYERS, SAGE_HIDDEN, ATOM_FEAT_DIM,
+    MAX_LENGTH, MACCS_DIM, MAX_ATOMS,
+    GINE_LAYERS, GINE_HIDDEN, BOND_FEAT_DIM, ATOM_FEAT_DIM,
     OUT_DIR, DATA_DIR,
 )
 from model import GraphMACCSEncoder
-from graph_utils import smiles_to_pyg, get_maccs
+from graph_utils import smiles_to_pyg, get_maccs, MACCS_NAMES
 from transformers import AutoTokenizer
 from rdkit import Chem
-
-# ✅ 우리가 방금 새로 만든 graph_utils2에서 안전한 번역기를 가져옵니다.
-from graph_utils2 import get_correct_maccs_name
 
 
 def load_model(ckpt_path: str, device: torch.device) -> GraphMACCSEncoder:
     encoder = GraphMACCSEncoder(
-        atom_feat_dim=ATOM_FEAT_DIM, maccs_dim=MACCS_DIM, sage_hidden=SAGE_HIDDEN,
-        sage_layers=SAGE_LAYERS, d_model=D_MODEL, num_heads=NUM_HEADS,
+        atom_feat_dim=ATOM_FEAT_DIM, bond_feat_dim=BOND_FEAT_DIM,
+        maccs_dim=MACCS_DIM, gine_hidden=GINE_HIDDEN, gine_layers=GINE_LAYERS,
+        d_model=D_MODEL, num_heads=NUM_HEADS,
         k=K, max_atoms=MAX_ATOMS, dropout=DROPOUT, model_name=MODEL_NAME,
     )
     state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
@@ -88,8 +87,7 @@ def plot_independent_head_heatmap(attn: np.ndarray, atom_syms: list[str], out_pa
             
         sub_attn = head_attn[:, top_idx]
         
-        # ✅ 새로 만든 번역 함수를 사용하여 X축 라벨(이름표)을 생성합니다.
-        x_labels = [get_correct_maccs_name(idx + 1) for idx in top_idx]
+        x_labels = [MACCS_NAMES.get(idx + 1, f"Key{idx+1}") or f"Key{idx+1}" for idx in top_idx]
 
         sns.heatmap(sub_attn, ax=axes[head_idx], cmap="Reds", annot=False,
                     xticklabels=x_labels, yticklabels=atom_syms)
@@ -98,13 +96,12 @@ def plot_independent_head_heatmap(attn: np.ndarray, atom_syms: list[str], out_pa
         axes[head_idx].set_xlabel("MACCS Keys")
         axes[head_idx].set_ylabel("Atoms")
         
-        # ✅ 글자 끝을 축에 맞추고 45도 회전시켜서 겹치지 않게 만듭니다.
         axes[head_idx].set_xticklabels(axes[head_idx].get_xticklabels(), rotation=45, ha='right', fontsize=10)
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"✅ 에러 없이 히트맵 생성이 완료되었습니다: {out_path}")
+    print(f"Saved: {out_path}")
 
 
 if __name__ == "__main__":

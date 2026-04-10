@@ -32,8 +32,9 @@ Step 3:   Feature 추출 + Stacking OOF (Stage 2)
    │  → node_proj Linear(64, 64)  → node_q (B, 100, 64)     │
    ├─────────────────────────────────────────────────────────┤
    │  MACCSkeys (B, 167) binary                              │
-   │  → Embedding(167, 64)[idx]  → maccs_kv (B, 167, 64)    │
-   │    inactive bits → kv_padding_mask (-1e9 in scores)     │
+   │  → Embedding(167, 64)[idx] * maccs (binary gate)        │
+   │  → maccs_kv (B, 167, 64)                                │
+   │    inactive bits → 0-vector (embedding zeroed out)      │
    └────────────────────────┬────────────────────────────────┘
                             ▼
          DifferentialCrossAttention
@@ -47,10 +48,10 @@ Step 3:   Feature 추출 + Stacking OOF (Stage 2)
 
          scores1 = Q1 @ K1^T / √16    (B, 4, 100, 167)
          scores2 = Q2 @ K2^T / √16
-         [inactive bits masked -1e9]
+         [inactive bits already 0-vectors; kv_padding_mask=None]
 
          λ = exp(λ_q1·λ_k1) - exp(λ_q2·λ_k2) + 0.8
-         λ.clamp(min=1e-4)              ← 음수화 방지
+         λ.clamp(min=1e-4, max=2.0)    ← 음수화 + 포화 방지
 
          a1 = softmax(scores1)
          a2 = softmax(scores2)
@@ -149,7 +150,7 @@ Train 전체 (1,398 샘플)
 
 ```
 λ = exp(λ_q1·λ_k1) - exp(λ_q2·λ_k2) + λ_init(0.8)
-λ.clamp(min=1e-4)   ← 2026-04-08 추가: lam 음수 방지, gradient 유지
+λ.clamp(min=1e-4, max=2.0)   ← 음수화 방지 + 포화 방지 (gradient 유지)
 
 scores = softmax(Q1@K1^T/√d) - λ · softmax(Q2@K2^T/√d)
        = a1 - λ · a2

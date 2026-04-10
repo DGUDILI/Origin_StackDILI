@@ -27,7 +27,8 @@ sys.path.insert(0, SRC_DIR)
 
 from config import (
     K, D_MODEL, NUM_HEADS, DROPOUT, MODEL_NAME,
-    MAX_LENGTH, MACCS_DIM, MAX_ATOMS, SAGE_LAYERS, SAGE_HIDDEN, ATOM_FEAT_DIM,
+    MAX_LENGTH, MACCS_DIM, MAX_ATOMS,
+    GINE_LAYERS, GINE_HIDDEN, BOND_FEAT_DIM, ATOM_FEAT_DIM,
     OUT_DIR, DATA_DIR,
 )
 from model import GraphMACCSEncoder
@@ -39,9 +40,10 @@ from rdkit import Chem
 def load_model(ckpt_path: str, device: torch.device) -> GraphMACCSEncoder:
     encoder = GraphMACCSEncoder(
         atom_feat_dim=ATOM_FEAT_DIM,
+        bond_feat_dim=BOND_FEAT_DIM,
         maccs_dim=MACCS_DIM,
-        sage_hidden=SAGE_HIDDEN,
-        sage_layers=SAGE_LAYERS,
+        gine_hidden=GINE_HIDDEN,
+        gine_layers=GINE_LAYERS,
         d_model=D_MODEL,
         num_heads=NUM_HEADS,
         k=K,

@@ -36,9 +36,8 @@ from torch_geometric.data import Batch as PyGBatch
 from config import (
     K, D_MODEL, NUM_HEADS, MODEL_NAME,
     BATCH_SIZE, MAX_LENGTH, SEED,
-    DATA_DIR, OUT_DIR,
-    DATA_PATH, FEAT_PATH, _USE_CLEAN,
-    MACCS_DIM, MAX_ATOMS, SAGE_LAYERS, SAGE_HIDDEN, ATOM_FEAT_DIM,
+    DATA_DIR, OUT_DIR, _USE_CLEAN,
+    MACCS_DIM, MAX_ATOMS, GINE_LAYERS, GINE_HIDDEN, BOND_FEAT_DIM, ATOM_FEAT_DIM,
 )
 from utils import set_seed
 from model import GraphMACCSEncoder
@@ -123,8 +122,9 @@ if __name__ == "__main__":
     encoder   = GraphMACCSEncoder(
         model_name=MODEL_NAME,
         atom_feat_dim=ATOM_FEAT_DIM,
-        sage_hidden=SAGE_HIDDEN,
-        sage_layers=SAGE_LAYERS,
+        bond_feat_dim=BOND_FEAT_DIM,
+        gine_hidden=GINE_HIDDEN,
+        gine_layers=GINE_LAYERS,
         maccs_dim=MACCS_DIM,
         d_model=D_MODEL,
         num_heads=NUM_HEADS,

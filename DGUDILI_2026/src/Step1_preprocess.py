@@ -21,10 +21,10 @@ _args, _ = parser.parse_known_args()
 FORCE = _args.force
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 1-A: 기존 FP 전처리 (E2E_FTV6StyleEncoder / E2E_MHAResidualEncoder 용)
+# Step 1-A: FP 전처리 (StandardScaler, fp_full_train/test.npy 저장)
 # ─────────────────────────────────────────────────────────────────────────────
 print("=" * 60)
-print("Step 1-A: FP Preprocessing (StandardScaler, 기존 모델용)")
+print("Step 1-A: FP Preprocessing (StandardScaler, fp_full_train/test.npy)")
 print("=" * 60)
 
 smiles_all, X_fp_all, y_all, ref_all, feat_cols = load_dataset(DATA_PATH, FEAT_PATH)
