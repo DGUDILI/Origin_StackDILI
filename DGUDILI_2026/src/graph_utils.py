@@ -315,6 +315,55 @@ def smiles_to_pyg(smiles: str):
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
 
+def augment_smiles(smiles: str, n_aug: int, seed: int | None = None) -> list[str]:
+    """
+    1개 SMILES → n_aug개 랜덤 SMILES 생성.
+
+    원리: Chem.MolToSmiles(mol, doRandom=True)는 동일 분자를 다른
+    원자 열거 순서(atom traversal order)로 직렬화 → 서로 다른 SMILES 문자열.
+
+    증강 효과:
+      - ChemBERTa 브랜치: 다른 토큰 시퀀스 → 다양한 컨텍스트 학습
+      - GINEConv 브랜치: 다른 원자 인덱싱 순서 → 메시지 패싱 경로 다양화
+      - MACCS 브랜치: 분자 동일 → 항상 동일 (불변 — 호출 측에서 원본 재사용)
+
+    Args:
+        smiles: 원본 SMILES 문자열
+        n_aug:  생성할 증강 SMILES 개수
+        seed:   재현성용 시드 (None이면 비결정적)
+
+    Returns:
+        n_aug개의 랜덤 SMILES 리스트.
+        유니크 생성 실패 시 canonical SMILES로 나머지 채움.
+        smiles 파싱 실패 시 원본 n_aug번 반복.
+    """
+    import random as _random
+    _random.seed(seed)
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return [smiles] * n_aug  # 파싱 실패 → 원본 반복
+
+    canonical = Chem.MolToSmiles(mol, doRandom=False)
+    seen = {canonical}
+    augmented = []
+    max_attempts = n_aug * 20  # 유니크 탐색 여유
+
+    for _ in range(max_attempts):
+        if len(augmented) >= n_aug:
+            break
+        rand_smi = Chem.MolToSmiles(mol, doRandom=True)
+        if rand_smi not in seen:
+            seen.add(rand_smi)
+            augmented.append(rand_smi)
+
+    # 유니크 부족 시 canonical로 보충 (소분자에서 발생 가능)
+    while len(augmented) < n_aug:
+        augmented.append(canonical)
+
+    return augmented
+
+
 def get_maccs(smiles: str) -> torch.Tensor:
     """
     SMILES → 167-dim binary tensor (float32).

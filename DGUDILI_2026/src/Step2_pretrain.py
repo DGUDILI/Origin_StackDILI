@@ -30,9 +30,11 @@ from config import (
     SCHED_PATIENCE, SCHED_FACTOR, SCHED_MIN_LR,
     DATA_DIR, OUT_DIR,
     MACCS_DIM, MAX_ATOMS, GINE_LAYERS, GINE_HIDDEN, ATOM_FEAT_DIM, BOND_FEAT_DIM,
+    N_AUG,
 )
 from utils import set_seed
 from model import GraphMACCSEncoder
+from graph_utils import augment_smiles, smiles_to_pyg
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -111,6 +113,42 @@ def collate_fn(batch: list[dict]) -> dict:
     }
 
 
+def augment_train_subset(data_list: list, n_aug: int, seed: int) -> list:
+    """
+    Split된 train 서브셋에만 SMILES 증강 적용.
+    Val 서브셋은 이 함수를 호출하지 않으므로 Data Leakage 없음.
+
+    Args:
+        data_list: Split 이후의 train 서브셋 [{pyg, maccs, label, smiles}, ...]
+        n_aug:     증강 개수 (config.N_AUG)
+        seed:      재현성용 시드
+
+    Returns:
+        원본 + 증강 합산 리스트 (원본 순서 유지, 증강 후 추가)
+        MACCS는 분자 동일 → 원본 maccs 재사용 (재계산 생략으로 속도 향상)
+    """
+    if n_aug == 0:
+        return data_list
+
+    augmented = list(data_list)  # 원본 유지
+    n_skip = 0
+    for d in data_list:
+        for rand_smi in augment_smiles(d["smiles"], n_aug=n_aug, seed=seed):
+            pyg = smiles_to_pyg(rand_smi)
+            if pyg is None:
+                n_skip += 1
+                continue  # 파싱 실패 스킵 (희귀 케이스)
+            augmented.append({
+                "pyg":    pyg,
+                "maccs":  d["maccs"],   # 동일 분자 → 원본 MACCS 재사용
+                "label":  d["label"],
+                "smiles": rand_smi,     # 실제 학습 SMILES (랜덤)
+            })
+    if n_skip:
+        print(f"  [Aug] 파싱 실패 스킵: {n_skip}개")
+    return augmented
+
+
 # ── 데이터 로드 ──────────────────────────────────────────────────────────────
 
 train_cache_path = os.path.join(DATA_DIR, "train_graphs.pt")
@@ -130,14 +168,53 @@ idx_tr, idx_val = train_test_split(
 )
 print(f"  train subset: {len(idx_tr)}, val subset: {len(idx_val)}")
 
+# ── SMILES 오프라인 증강 (Train Subset Only — 데이터 누수 방지) ──────────────
+# split 먼저 → 증강: Val/Test는 일절 건드리지 않음.
+# 캐시 경로에 N_AUG 포함 → 값 변경 시 자동 재생성.
+train_subset_orig = [all_data[i] for i in idx_tr]
+val_data          = [all_data[i] for i in idx_val]
+
+# 누수 검증 (split 후, 증강 전 원본 SMILES 기준)
+_train_orig_smiles = {d["smiles"] for d in train_subset_orig}
+_val_smiles        = {d["smiles"] for d in val_data}
+_overlap = _train_orig_smiles & _val_smiles
+assert len(_overlap) == 0, f"Leakage detected: {len(_overlap)} SMILES overlap"
+print(f"[OK] No data leakage (train_orig={len(_train_orig_smiles)}, val={len(_val_smiles)})")
+
+if N_AUG > 0:
+    aug_cache_path = os.path.join(DATA_DIR, f"train_graphs_aug_{N_AUG}x_{SEED}.pt")
+    if os.path.exists(aug_cache_path):
+        print(f"  [Aug Cache] 로딩: {aug_cache_path}")
+        train_data = torch.load(aug_cache_path, weights_only=False)
+    else:
+        print(f"\n[Augment] N_AUG={N_AUG} → train {len(train_subset_orig)}개 × 최대 {N_AUG+1}배...")
+        train_data = augment_train_subset(train_subset_orig, n_aug=N_AUG, seed=SEED)
+        torch.save(train_data, aug_cache_path)
+        print(f"  [Aug Cache] 저장: {aug_cache_path}  ({len(train_data)}개)")
+    print(f"  augmented train: {len(train_subset_orig)} → {len(train_data)}개")
+    print(f"  val (원본 유지): {len(val_data)}개")
+else:
+    train_data = train_subset_orig
+    print(f"  N_AUG=0: 증강 없음 (train={len(train_data)}, val={len(val_data)})")
+
+# pos_weight를 증강 후 train 기준으로 재계산 (val 포함 전체에서 계산하면 부정확)
+_train_labels = np.array([d["label"].item() for d in train_data])
+n_pos = int(_train_labels.sum()); n_neg = len(_train_labels) - n_pos
+print(f"  최종 train: {len(train_data)}개  |  pos={n_pos}, neg={n_neg}")
+
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
+# N_AUG가 달라지면 토큰 캐시도 자동으로 다른 파일 사용
+# 파일명 형식: graph_train_tokens_42.pt (N_AUG=0) / graph_train_tokens_42_aug2.pt (N_AUG=2)
+_aug_suffix = f"_aug{N_AUG}" if N_AUG > 0 else ""
+_train_token_cache = os.path.join(DATA_DIR, f"graph_train_tokens_{SEED}{_aug_suffix}.pt")
+
 train_ds = MolGraphDataset(
-    [all_data[i] for i in idx_tr], tokenizer, MAX_LENGTH,
-    cache_path=os.path.join(DATA_DIR, f"graph_train_tokens_{SEED}.pt"),
+    train_data, tokenizer, MAX_LENGTH,
+    cache_path=_train_token_cache,
 )
 val_ds = MolGraphDataset(
-    [all_data[i] for i in idx_val], tokenizer, MAX_LENGTH,
+    val_data, tokenizer, MAX_LENGTH,
     cache_path=os.path.join(DATA_DIR, f"graph_val_tokens_{SEED}.pt"),
 )
 
@@ -212,7 +289,7 @@ def run_inference(model, dl):
 # ── 학습 루프 ─────────────────────────────────────────────────────────────────
 
 best_val_auc, best_state, patience_cnt = 0.0, None, 0
-y_val_np = np.array([all_data[i]["label"].item() for i in idx_val])
+y_val_np = np.array([d["label"].item() for d in val_data])
 y_val_t  = torch.tensor(y_val_np, dtype=torch.float32)
 
 for epoch in range(1, EPOCHS + 1):

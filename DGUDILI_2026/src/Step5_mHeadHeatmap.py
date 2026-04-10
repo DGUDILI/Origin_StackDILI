@@ -62,7 +62,6 @@ def extract_attn(encoder, smiles: str, tokenizer, device) -> tuple:
     attn_raw = attn_raw[0, :, :n_atoms, :]
     attn_relu = torch.relu(attn_raw)[:, :, 1:].cpu().numpy()
 
-    # 아스피린에 없는 특징은 여기서 무조건 0으로 삭제됨
     active_maccs = mac[0, 1:].cpu().numpy()
     attn_relu = attn_relu * active_maccs
 

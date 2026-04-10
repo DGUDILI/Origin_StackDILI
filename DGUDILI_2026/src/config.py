@@ -5,7 +5,10 @@ K          = 32       # encode() 출력 차원 (Stacking 입력, 16→32: 표현
 D_MODEL    = 64       # MHA 내부 차원 (실험 결과: d=64가 최적, d=128 이상은 FP proj 과적합)
 NUM_HEADS  = 4        # MHA 헤드 수 (d_model % num_heads == 0 조건)
 DROPOUT    = 0.3
-MODEL_NAME = "DeepChem/ChemBERTa-77M-MLM"
+MODEL_NAME = os.environ.get(
+    "CHEMBERTA_PATH",
+    r"C:\Users\samsung\.cache\huggingface\hub\models--DeepChem--ChemBERTa-77M-MLM\snapshots\ed8a5374f2024ec8da53760af91a33fb8f6a15ff"
+)
 
 # ── 학습 설정 ────────────────────────────────────────────────────────────────────
 BATCH_SIZE     = 16
@@ -19,6 +22,11 @@ WEIGHT_DECAY   = 1e-4
 SCHED_PATIENCE = 8
 SCHED_FACTOR   = 0.5
 SCHED_MIN_LR   = 1e-5
+
+# ── 데이터 증강 ──────────────────────────────────────────────────────────────
+N_AUG = 2   # Train subset 당 랜덤 SMILES 증강 개수 (0 = 비활성화)
+             # N_AUG=2 → 원본 1 + 증강 2 = 샘플 최대 3배 (train만, val/test 불변)
+             # epoch 소요 시간 참고 (CPU 환경): N_AUG=0 → ~3분, N_AUG=2 → ~7분, N_AUG=5 → ~20분
 
 # ── GraphMACCSEncoder 전용 하이퍼파라미터 ────────────────────────────────────
 MACCS_DIM      = 167    # RDKit MACCSkeys 벡터 길이 (bit 0 미사용, bits 1~166 유효)
