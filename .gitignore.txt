@@ -1,0 +1,27 @@
+# ── Backend & Python ──────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+
+# ── AI Models & Heavy Weights (용량 초과 방지) ──────────────────────────────
+*.pt
+*.pth
+webapp/backend/weights/
+
+# ── Frontend & Node ───────────────────────────────────────────────────
+node_modules/
+/webapp/frontend/dist/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ── OS & IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

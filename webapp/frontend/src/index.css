@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* SVG 분자 이미지를 카드 내부에 반응형으로 표시 */
+@layer utilities {
+  .molecule-svg svg {
+    @apply w-full h-auto;
+  }
+}
