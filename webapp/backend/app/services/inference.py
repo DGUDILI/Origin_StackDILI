@@ -126,7 +126,9 @@ def _run_forward_pass(
     with torch.no_grad():
         logit = model(input_ids, attn_mask, maccs_tensor, graph_batch)  # (1, 1)
 
-    probability_pct = round(torch.sigmoid(logit).item() * 100.0, 2)
+    # sigmoid(logit) = P(label=1). 모델은 label 0=DILI 관례로 학습되어 부호가 반전되어 있음.
+    # 1 - sigmoid(logit) = P(DILI) 로 보정.
+    probability_pct = round((1.0 - torch.sigmoid(logit).item()) * 100.0, 2)
 
     # multihead_scores를 즉시 복사: (B, h, MAX_ATOMS, 167)
     # .clone()하지 않으면 다음 요청의 Forward pass가 이 텐서를 덮어씀

@@ -86,8 +86,10 @@ def extract_mh_scores_numpy(
         # fallback: head-averaged (MAX_ATOMS, 167)
         t = t.unsqueeze(0)       # (1, MAX_ATOMS, 167)
 
-    # ── relu + bit 0 제거 + 원자 슬라이싱 ─────────────────────────────────
-    t = torch.relu(t)            # 양의 상관관계만 유지
+    # ── bit 0 제거 + 원자 슬라이싱 (relu 제거 — 부호 보존) ──────────────────
+    # relu를 여기서 적용하면 모든 원자에 균일한 소양수가 남아 변별력이 사라짐.
+    # 부호를 보존해야 compute_atom_importance()에서 음수(보호 기여) 원자를 파란색으로 구분 가능.
+    # MACCS 패턴 랭킹용 relu는 extract_top_maccs_patterns() 내부에서 별도 적용.
     t = t[:, :n_atoms, 1:]       # (h, n_atoms, 166) — bit 0 제외
 
     arr = t.detach().cpu().numpy().astype(np.float32)
@@ -105,18 +107,20 @@ def extract_mh_scores_numpy(
 
 def compute_atom_importance(mh_scores: np.ndarray) -> np.ndarray:
     """
-    원자별 총 어텐션 중요도 계산 후 L∞ 정규화.
+    원자별 총 어텐션 중요도 계산 후 대칭 L∞ 정규화.
 
     Args:
-        mh_scores: (num_heads, n_atoms, 166) float32
+        mh_scores: (num_heads, n_atoms, 166) float32  ← 부호 보존 (relu 미적용)
 
     Returns:
-        atom_importance: (n_atoms,) float32, 범위 [0, 1]
+        atom_importance: (n_atoms,) float32, 범위 [-1, 1]
+          양수 → 독성 기여 (빨간색), 음수 → 보호 기여 (파란색), 0 근방 → 무색
 
     Algorithm:
-        - 헤드 4개 × MACCS 166비트에 걸쳐 각 원자의 어텐션 합산
-          importance[i] = Σ_h Σ_j mh_scores[h, i, j]
-        - max 정규화: 가장 중요한 원자 = 1.0
+        - 헤드 4개 × MACCS 166비트에 걸쳐 각 원자의 differential 어텐션 합산
+          importance[i] = Σ_h Σ_j mh_scores[h, i, j]  (음수 포함)
+        - 대칭 L∞ 정규화: max(|importance|)로 나눔 → [-1, 1]
+          (단방향 max 정규화 대신 부호 변별력 보존)
     """
     if mh_scores.size == 0:
         return np.zeros(0, dtype=np.float32)
@@ -124,9 +128,10 @@ def compute_atom_importance(mh_scores: np.ndarray) -> np.ndarray:
     # (h, n_atoms, 166) → sum MACCS → (h, n_atoms) → sum heads → (n_atoms,)
     importance: np.ndarray = mh_scores.sum(axis=2).sum(axis=0)
 
-    max_val = importance.max()
-    if max_val > 1e-9:
-        importance = importance / max_val
+    # 대칭 L∞ 정규화: 절댓값 최대로 나눔 (양/음 모두 [-1,1] 범위로)
+    max_abs = np.abs(importance).max()
+    if max_abs > 1e-9:
+        importance = importance / max_abs
 
     return importance.astype(np.float32)
 
@@ -161,8 +166,12 @@ def extract_top_maccs_patterns(
     if mh_scores.size == 0:
         return []
 
+    # 양의 differential 기여만 MACCS 패턴 랭킹에 사용 (독성 기여 패턴 추출 목적)
+    # extract_mh_scores_numpy()는 부호 보존 상태이므로 여기서 로컬 relu 적용.
+    relu_scores = np.maximum(mh_scores, 0.0)
+
     # (h, n_atoms, 166) → sum(heads, atoms) → (166,)
-    pattern_sum: np.ndarray = mh_scores.sum(axis=(0, 1))
+    pattern_sum: np.ndarray = relu_scores.sum(axis=(0, 1))
 
     total = pattern_sum.sum()
     if total < 1e-9:
@@ -202,23 +211,26 @@ def render_xai_svg(
     height: int = 400,
 ) -> str:
     """
-    원자 중요도 기반 Red-gradient 하이라이트 분자 SVG 생성.
-
-    Step4_xai.py의 plot_mol_importance()와 동일한 색상 알고리즘.
+    원자 중요도 기반 발산형(Red-Blue) 하이라이트 분자 SVG 생성.
 
     Args:
         smiles         : Canonical SMILES
-        atom_importance: (n_atoms,) float32, 정규화된 [0, 1]
-        threshold      : 하이라이트 최소 임계값 (기본 0.10)
+        atom_importance: (n_atoms,) float32, 대칭 정규화된 [-1, 1]
+                         양수 → 독성 기여, 음수 → 보호 기여
+        threshold      : |importance| 최소 임계값 (기본 0.10)
         width, height  : SVG 픽셀 크기
 
     Returns:
         SVG 문자열 (<?xml ...> 헤더 포함, 직접 <div>에 삽입 가능)
 
-    Color scheme (Step4_xai.py 호환):
-        imp = 0.10 → (1.0, 0.92, 0.92)  연한 분홍
-        imp = 0.50 → (1.0, 0.60, 0.60)  중간 빨강
-        imp = 1.00 → (1.0, 0.20, 0.20)  진한 빨강
+    Color scheme (발산형):
+        imp > 0  (독성 기여) → 빨강 그라디언트: (1.0, 1-0.8*imp, 1-0.8*imp)
+          imp=0.10 → (1.0, 0.92, 0.92)  연한 분홍
+          imp=1.00 → (1.0, 0.20, 0.20)  진한 빨강
+        imp < 0  (보호 기여) → 파랑 그라디언트: (1+0.8*imp, 1+0.8*imp, 1.0)
+          imp=-0.10 → (0.92, 0.92, 1.0)  연한 하늘
+          imp=-1.00 → (0.20, 0.20, 1.0)  진한 파랑
+        |imp| < threshold → 무색
 
     Raises:
         ValueError: SMILES 파싱 실패 시
@@ -248,12 +260,17 @@ def render_xai_svg(
 
     for idx in range(n_atoms):
         imp = float(atom_importance[idx])
-        if imp < threshold:
+        if abs(imp) < threshold:
             continue
-        # Red gradient: (1.0, 1-0.8*imp, 1-0.8*imp)
-        g_b = max(0.0, 1.0 - imp * 0.8)
-        atom_color_map[idx] = (1.0, g_b, g_b)
-        atom_radius_map[idx] = 0.25 + imp * 0.20  # 중요도 비례 하이라이트 반경
+        if imp > 0.0:
+            # 독성 기여 원자 → 빨강 (imp 클수록 진해짐)
+            g_b = max(0.0, 1.0 - imp * 0.8)
+            atom_color_map[idx] = (1.0, g_b, g_b)
+        else:
+            # 보호 기여 원자 → 파랑 (|imp| 클수록 진해짐)
+            r_g = max(0.0, 1.0 + imp * 0.8)   # imp < 0 이므로 1.0 + 음수 = 감소
+            atom_color_map[idx] = (r_g, r_g, 1.0)
+        atom_radius_map[idx] = 0.25 + abs(imp) * 0.20
         highlight_atoms.append(idx)
 
     # ── 결합 색상 (양 끝 원자가 모두 하이라이트된 경우) ─────────────────
