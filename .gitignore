@@ -3,11 +3,13 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 .venv/
 venv/
 ENV/
+env/
 
-# ── AI Models & Heavy Weights (용량 초과 방지) ──────────────────────────────
+# ── AI Models & Heavy Weights ─────────────────────────────────────────
 *.pt
 *.pth
 webapp/backend/weights/
@@ -20,8 +22,16 @@ node_modules/
 .env.test.local
 .env.production.local
 
+# ── Backend secrets ───────────────────────────────────────────────────
+webapp/backend/.env
+
+# ── Jupyter ───────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
 # ── OS & IDE ──────────────────────────────────────────────────────────
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
