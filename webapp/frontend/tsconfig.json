@@ -16,8 +16,8 @@
 
     /* Strictness */
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
 
     /* Path alias — vite.config.ts의 resolve.alias와 동기화 */

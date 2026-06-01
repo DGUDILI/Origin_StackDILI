@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dgudili-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEVICE=cpu
+      - DILI_THRESHOLD=0.45
+      - ALLOWED_ORIGINS=http://localhost:3000
+      - S3_ENABLED=false
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend/weights:/app/weights:ro
+      - hf_cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: dgudili-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  hf_cache:
