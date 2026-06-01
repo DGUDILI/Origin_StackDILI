@@ -17,15 +17,6 @@ const R  = 90           // 반지름
 const SW = 16           // 트랙 두께 (strokeWidth)
 const TOTAL_LEN = Math.PI * R   // 반원 호 길이 ≈ 282.74
 
-/** 백분율 → 호 위 좌표 (y-down SVG 기준) */
-const pctToPoint = (pct: number) => {
-  const angle = Math.PI * (1 - pct / 100)
-  return {
-    x: CX + R * Math.cos(angle),
-    y: CY - R * Math.sin(angle),
-  }
-}
-
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface RiskGaugeProps {

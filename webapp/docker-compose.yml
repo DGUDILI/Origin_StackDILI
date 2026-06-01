@@ -1,0 +1,54 @@
+version: "3.9"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DGUDILI — 로컬 Docker Compose
+#
+# 사용법:
+#   docker compose up --build
+#   프론트엔드: http://localhost:3000
+#   백엔드 API: http://localhost:8000
+#   Swagger UI: http://localhost:8000/docs
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dgudili-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEVICE=cpu
+      - DILI_THRESHOLD=0.45
+      - ALLOWED_ORIGINS=http://localhost:3000
+      - S3_ENABLED=false
+      - LOG_LEVEL=INFO
+    volumes:
+      # 가중치 파일을 호스트에서 마운트 (이미지 재빌드 없이 교체 가능)
+      - ./backend/weights:/app/weights:ro
+      # HuggingFace 모델 캐시 영속화 (재시작 시 재다운로드 방지)
+      - hf_cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s   # ChemBERTa 로드 대기
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # 개발용: backend 컨테이너로 직접 연결
+        VITE_API_BASE_URL: http://localhost:8000
+    container_name: dgudili-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  hf_cache:

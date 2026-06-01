@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # webapp/backend/  (app/core/ 기준 두 단계 상위)
@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     batch_chunk_size: int = 32    # 내부 추론 루프 단위 크기
 
     # ── AWS ──────────────────────────────────────────────────────────────────
+    # 로컬 개발 시 S3_ENABLED=false (기본) → boto3 연결 시도 없이 in-memory 결과 유지
+    # 프로덕션 배포 시 .env에 S3_ENABLED=true, S3_BUCKET_NAME, AWS_REGION 설정
+    s3_enabled: bool = False
     s3_bucket_name: str = "dgudili-batch-results"
     aws_region: str = "ap-northeast-2"
     presigned_url_expiry: int = 3600  # S3 presigned URL 유효 시간(초)

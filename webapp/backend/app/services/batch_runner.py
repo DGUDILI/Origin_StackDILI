@@ -237,8 +237,7 @@ def _maybe_upload_s3(task_id: str, csv_content: str) -> Optional[str]:
     s3_bucket_name이 기본값("dgudili-batch-results")이면 실제 연결 시도하지 않음.
     실패해도 예외를 전파하지 않고 None 반환 (in-memory 결과는 유지됨).
     """
-    # 기본 더미 버킷명이면 S3 연동 비활성
-    if not settings.s3_bucket_name:
+    if not settings.s3_enabled:
         return None
 
     try:

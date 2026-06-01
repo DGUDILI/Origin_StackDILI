@@ -44,7 +44,7 @@ export default function App() {
           {/* 브랜드 */}
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 shadow-sm">
-              <FlaskConical className="h-4.5 w-4.5 text-white" aria-hidden />
+              <FlaskConical className="h-4 w-4 text-white" aria-hidden />
             </div>
             <div>
               <span className="text-base font-bold tracking-tight text-slate-900">DGUDILI</span>

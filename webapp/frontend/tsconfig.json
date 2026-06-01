@@ -20,6 +20,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
+    /* Vite 환경변수 타입 (import.meta.env) */
+    "types": ["vite/client"],
+
     /* Path alias — vite.config.ts의 resolve.alias와 동기화 */
     "baseUrl": ".",
     "paths": {

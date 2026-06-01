@@ -175,7 +175,7 @@ export default function BatchScreeningView() {
   const [taskId,      setTaskId]      = useState<string | null>(null)
   const [csvRows,     setCsvRows]     = useState<BatchRow[]>([])
   const [sorting,     setSorting]     = useState<SortingState>([])
-  const [parseError,  setParseError]  = useState<string | null>(null)
+  const [_parseError, setParseError]  = useState<string | null>(null)
 
   // ── 업로드 Mutation ────────────────────────────────────────────────────────
   const uploadMutation = useMutation({
