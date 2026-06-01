@@ -106,84 +106,62 @@ export default function SinglePredictView() {
       const reportEl = document.getElementById('dili-report-content')
       if (!reportEl) return
 
-      // 1. 라이브 DOM 보호를 위해 클론 생성 후 화면 밖 배치
-      const clone = reportEl.cloneNode(true) as HTMLElement
-      Object.assign(clone.style, {
-        position  : 'absolute',
-        top       : '-99999px',
-        left      : '0px',
-        width     : `${reportEl.offsetWidth}px`,
-        background: '#f8fafc',
-        zIndex    : '-1',
-      })
-      document.body.appendChild(clone)
-
-      // 2. SVG → base64 img 변환
-      //    dangerouslySetInnerHTML로 주입된 SVG는 html2canvas가 올바르게 캡처하지 못하므로
-      //    XMLSerializer로 직렬화 후 data URL img 엘리먼트로 교체
-      const origSvgs  = Array.from(reportEl.querySelectorAll<SVGSVGElement>('svg'))
-      const cloneSvgs = Array.from(clone.querySelectorAll<SVGSVGElement>('svg'))
-
-      await Promise.all(
-        cloneSvgs.map(async (svg, i) => {
-          const rect = origSvgs[i]?.getBoundingClientRect() ?? { width: 600, height: 400 }
-          const w = Math.ceil(rect.width)
-          const h = Math.ceil(rect.height)
-
-          // width/height 명시 (html2canvas 요구사항)
-          svg.setAttribute('width',  `${w}`)
-          svg.setAttribute('height', `${h}`)
-          if (!svg.getAttribute('xmlns')) {
-            svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-          }
-
-          // SVG 문자열 → base64 data URL
-          const svgStr = new XMLSerializer().serializeToString(svg)
-          const bytes  = new TextEncoder().encode(svgStr)
-          let binary   = ''
-          bytes.forEach((b) => { binary += String.fromCharCode(b) })
-          const dataUrl = `data:image/svg+xml;base64,${btoa(binary)}`
-
-          const img = document.createElement('img')
-          img.src             = dataUrl
-          img.width           = w
-          img.height          = h
-          img.style.cssText   = `display:block;width:${w}px;height:${h}px;`
-
-          await new Promise<void>((resolve) => {
-            if (img.complete) { resolve(); return }
-            img.onload  = () => resolve()
-            img.onerror = () => resolve()  // 실패 시에도 진행
-          })
-
-          svg.parentNode?.replaceChild(img, svg)
-        }),
-      )
-
-      // 3. html2canvas 캡처 (scale 2배 = 고해상도)
-      const canvas = await html2canvas(clone, {
-        scale          : 2,
+      // html2canvas의 onclone 콜백을 사용
+      // ─ 수동 clone + 극단적 오프스크린 배치(top:-99999px) + zIndex:-1 조합은
+      //   브라우저가 요소를 페인팅 대상에서 제외하거나 body 배경 뒤로 밀어내어
+      //   전체 콘텐츠가 반투명·흐릿하게 캡처되는 원인이 됨.
+      // ─ onclone을 쓰면 html2canvas가 자체 클론 파이프라인 안에서 처리하므로
+      //   해당 렌더링 버그가 발생하지 않음.
+      const canvas = await html2canvas(reportEl, {
+        scale          : 2,       // 2× 해상도 → PDF 선명도 확보
         useCORS        : true,
-        allowTaint     : false,
-        backgroundColor: '#f8fafc',
+        allowTaint     : true,    // SVG · inline 엘리먼트 렌더링 허용
+        backgroundColor: '#ffffff',
         logging        : false,
         imageTimeout   : 15_000,
+        onclone        : (clonedDoc) => {
+          const el = clonedDoc.getElementById('dili-report-content')
+          if (!el) return
+
+          // animate-fade-in 등 CSS 애니메이션이 opacity 과도기 상태로
+          // 캡처되지 않도록 모든 하위 요소의 animation/transition 제거
+          el.style.animation = 'none'
+          el.style.opacity   = '1'
+          clonedDoc
+            .querySelectorAll<HTMLElement>('#dili-report-content *')
+            .forEach((child) => {
+              child.style.animation  = 'none'
+              child.style.transition = 'none'
+            })
+
+          // dangerouslySetInnerHTML SVG에 명시적 width/height/xmlns 부여
+          // (html2canvas의 SVG 렌더러는 치수가 명시되어야 올바르게 그림)
+          const origSvgs = Array.from(reportEl.querySelectorAll<SVGSVGElement>('svg'))
+          el.querySelectorAll<SVGSVGElement>('svg').forEach((svg, i) => {
+            const orig = origSvgs[i]
+            if (orig) {
+              const { width, height } = orig.getBoundingClientRect()
+              if (width  > 0) svg.setAttribute('width',  `${Math.ceil(width)}`)
+              if (height > 0) svg.setAttribute('height', `${Math.ceil(height)}`)
+            }
+            if (!svg.getAttribute('xmlns')) {
+              svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+            }
+          })
+        },
       })
-      document.body.removeChild(clone)
 
-      // 4. jsPDF A4 출력 (컨텐츠 높이에 따라 자동 페이지 분할)
-      const pdf     = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-      const MARGIN  = 10
-      const PAGE_W  = pdf.internal.pageSize.getWidth()  - MARGIN * 2
-      const PAGE_H  = pdf.internal.pageSize.getHeight() - MARGIN * 2
-      const scale   = PAGE_W / canvas.width
-      const pxPerPage = PAGE_H / scale  // 한 페이지에 해당하는 캔버스 픽셀 행 수
+      // A4 PDF 빌드 (컨텐츠 높이에 따라 자동 페이지 분할)
+      const pdf      = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+      const MARGIN   = 10
+      const PAGE_W   = pdf.internal.pageSize.getWidth()  - MARGIN * 2  // ≈ 190mm
+      const PAGE_H   = pdf.internal.pageSize.getHeight() - MARGIN * 2  // ≈ 277mm
+      const mmPerPx  = PAGE_W / canvas.width                           // mm/canvas pixel
+      const pxPerPage = PAGE_H / mmPerPx                               // 한 페이지 픽셀 행 수
 
-      let srcY = 0
-      let isFirstPage = true
+      let srcY = 0; let first = true
       while (srcY < canvas.height) {
-        if (!isFirstPage) pdf.addPage()
-
+        if (!first) pdf.addPage()
         const sliceH = Math.min(pxPerPage, canvas.height - srcY)
         const slice  = document.createElement('canvas')
         slice.width  = canvas.width
@@ -192,19 +170,17 @@ export default function SinglePredictView() {
           canvas, 0, srcY, canvas.width, sliceH,
           0, 0, canvas.width, sliceH,
         )
-
         pdf.addImage(
           slice.toDataURL('image/png'),
-          'PNG', MARGIN, MARGIN, PAGE_W, sliceH * scale,
+          'PNG', MARGIN, MARGIN, PAGE_W, sliceH * mmPerPx,
         )
-
         srcY += sliceH
-        isFirstPage = false
+        first = false
       }
 
-      // 5. 파일명: DILI_Analysis_Report_[canonical SMILES].pdf
-      const safeSmiles = result.canonical_smiles.replace(/[^\w]/g, '_').slice(0, 40)
-      pdf.save(`DILI_Analysis_Report_${safeSmiles}.pdf`)
+      // 파일명: DILI_Analysis_Report_[canonical SMILES].pdf
+      const safe = result.canonical_smiles.replace(/[^\w]/g, '_').slice(0, 40)
+      pdf.save(`DILI_Analysis_Report_${safe}.pdf`)
 
     } catch (err) {
       console.error('PDF 생성 오류:', err)
