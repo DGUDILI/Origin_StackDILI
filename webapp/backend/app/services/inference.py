@@ -126,9 +126,8 @@ def _run_forward_pass(
     with torch.no_grad():
         logit = model(input_ids, attn_mask, maccs_tensor, graph_batch)  # (1, 1)
 
-    # sigmoid(logit) = P(label=1). 모델은 label 0=DILI 관례로 학습되어 부호가 반전되어 있음.
-    # 1 - sigmoid(logit) = P(DILI) 로 보정.
-    probability_pct = round((1.0 - torch.sigmoid(logit).item()) * 100.0, 2)
+    # sigmoid(logit) = P(DILI). 모델은 label 1=DILI 관례로 학습됨.
+    probability_pct = round(torch.sigmoid(logit).item() * 100.0, 2)
 
     # multihead_scores를 즉시 복사: (B, h, MAX_ATOMS, 167)
     # .clone()하지 않으면 다음 요청의 Forward pass가 이 텐서를 덮어씀
@@ -189,8 +188,8 @@ def _run_model_inference(
 
     if include_xai:
         try:
-            # build_xai_outputs: mh_raw는 이미 .clone()된 안전한 복사본
-            top_maccs, svg = _run_xai_sync(mh_raw, canonical, n_atoms)
+            # probability_pct를 함께 전달 — SVG 색상(빨강/파랑) 결정에 사용
+            top_maccs, svg = _run_xai_sync(mh_raw, canonical, n_atoms, probability_pct)
         except Exception as exc:
             logger.warning(
                 "XAI processing failed for %r: %s — using plain SVG fallback",
@@ -215,13 +214,20 @@ def _run_xai_sync(
     mh_raw: Optional[torch.Tensor],
     canonical: str,
     n_atoms: int,
+    prob: float,
 ) -> tuple[list[MaccsPatternScore], str]:
     """
     XAI 처리 동기 버전 (Lock 외부에서 호출).
     build_xai_outputs와 동일 로직이나, asyncio.to_thread 없이 직접 호출.
+
+    Args:
+        mh_raw   : multihead_scores 클론 텐서 (또는 None)
+        canonical: Canonical SMILES
+        n_atoms  : 실제 원자 수
+        prob     : DILI 예측 확률 (0.0 ~ 100.0 %) — SVG 색상 결정 (>45 → 빨강, ≤45 → 파랑)
     """
     from app.services.xai import build_xai_outputs
-    return build_xai_outputs(mh_raw, canonical, n_atoms, top_k=3)
+    return build_xai_outputs(mh_raw, canonical, n_atoms, prob, top_k=3)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -8,9 +8,11 @@ Step4_xai.py의 알고리즘을 웹 서비스용으로 재구성.
   2. torch.relu() → 음수 differential 노이즈 제거 (differential 메커니즘 artifact)
   3. bit 0 제외 (RDKit 1-based indexing dummy, always 0) → 유효 bits 1~166
   4. 실제 원자 수 슬라이싱 (MAX_ATOMS 패딩 제거)
-  5. 원자 중요도: sum over (heads, MACCS_bits) → L∞ 정규화 → [0, 1]
+  5. 원자 중요도: sum over (heads, MACCS_bits) → Min-Max 정규화 → [0, 1]
   6. MACCS 패턴 기여도: sum over (heads, atoms) → 전체 합 대비 비율
   7. RDKit rdMolDraw2D로 원자 색상 오버레이 SVG 생성
+     - prob > 45.0 (DILI 예측): 빨강 그라디언트
+     - prob ≤ 45.0 (안전 예측): 파랑 그라디언트
 
 스레드 안전성:
   이 모듈의 함수들은 순수 numpy/RDKit 연산입니다.
@@ -28,8 +30,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# 원자 중요도 하이라이트 최소 임계값 (정규화 기준 0~1)
-HIGHLIGHT_THRESHOLD: float = 0.10
+# 원자 중요도 하이라이트 최소 임계값 (Min-Max 정규화 기준 0~1)
+HIGHLIGHT_THRESHOLD: float = 0.15
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,10 +67,11 @@ def extract_mh_scores_numpy(
           - axis 0: 어텐션 헤드 (4개)
           - axis 1: 실제 원자 (n_atoms개)
           - axis 2: 유효 MACCS bits (bits 1~166, bit 0 제외)
+          - 모든 값 ≥ 0 (relu 적용으로 음수 differential 노이즈 제거)
 
     Algorithm:
         1. squeeze batch dim: (B, h, MAX, 167) → (h, MAX, 167)
-        2. relu: 음수 differential 노이즈 제거
+        2. relu: 음수 differential 어텐션 노이즈 제거 (Step4_xai.py 동일)
         3. bit 0 제외: [:, :, 1:] → (h, MAX, 166)
         4. 실제 원자 슬라이싱: [:, :n_atoms, :] → (h, n_atoms, 166)
     """
@@ -84,13 +87,13 @@ def extract_mh_scores_numpy(
 
     if t.ndim == 2:
         # fallback: head-averaged (MAX_ATOMS, 167)
-        t = t.unsqueeze(0)       # (1, MAX_ATOMS, 167)
+        t = t.unsqueeze(0)  # (1, MAX_ATOMS, 167)
 
-    # ── bit 0 제거 + 원자 슬라이싱 (relu 제거 — 부호 보존) ──────────────────
-    # relu를 여기서 적용하면 모든 원자에 균일한 소양수가 남아 변별력이 사라짐.
-    # 부호를 보존해야 compute_atom_importance()에서 음수(보호 기여) 원자를 파란색으로 구분 가능.
-    # MACCS 패턴 랭킹용 relu는 extract_top_maccs_patterns() 내부에서 별도 적용.
-    t = t[:, :n_atoms, 1:]       # (h, n_atoms, 166) — bit 0 제외
+    # ── relu → bit 0 제외 → 원자 슬라이싱 ────────────────────────────────
+    # relu로 음수 differential 노이즈를 제거해야 원자별 변별력이 살아남.
+    # 제거하면 음/양이 섞인 합산 결과가 대부분 양수로 수렴해 모든 원자가 동일 강도로 강조됨.
+    t = torch.relu(t)
+    t = t[:, :n_atoms, 1:]  # (h, n_atoms, 166) — bit 0 제외
 
     arr = t.detach().cpu().numpy().astype(np.float32)
 
@@ -107,20 +110,21 @@ def extract_mh_scores_numpy(
 
 def compute_atom_importance(mh_scores: np.ndarray) -> np.ndarray:
     """
-    원자별 총 어텐션 중요도 계산 후 대칭 L∞ 정규화.
+    원자별 총 어텐션 중요도 계산 후 Min-Max 정규화.
 
     Args:
-        mh_scores: (num_heads, n_atoms, 166) float32  ← 부호 보존 (relu 미적용)
+        mh_scores: (num_heads, n_atoms, 166) float32, 모든 값 ≥ 0 (relu 적용됨)
 
     Returns:
-        atom_importance: (n_atoms,) float32, 범위 [-1, 1]
-          양수 → 독성 기여 (빨간색), 음수 → 보호 기여 (파란색), 0 근방 → 무색
+        atom_importance: (n_atoms,) float32, 범위 [0, 1]
+          0.0 = 어텐션 없는 원자 / 1.0 = 가장 강하게 주목받은 원자
 
     Algorithm:
         - 헤드 4개 × MACCS 166비트에 걸쳐 각 원자의 differential 어텐션 합산
-          importance[i] = Σ_h Σ_j mh_scores[h, i, j]  (음수 포함)
-        - 대칭 L∞ 정규화: max(|importance|)로 나눔 → [-1, 1]
-          (단방향 max 정규화 대신 부호 변별력 보존)
+          importance[i] = Σ_h Σ_j mh_scores[h, i, j]
+        - Min-Max 정규화: (x - min) / (max - min) → [0, 1]
+          가장 주목받은 원자 = 1.0, 가장 덜 주목받은 원자 = 0.0
+          (대칭 L∞ 대신 Min-Max를 써야 분자 내 원자 간 상대적 변별력이 유지됨)
     """
     if mh_scores.size == 0:
         return np.zeros(0, dtype=np.float32)
@@ -128,10 +132,14 @@ def compute_atom_importance(mh_scores: np.ndarray) -> np.ndarray:
     # (h, n_atoms, 166) → sum MACCS → (h, n_atoms) → sum heads → (n_atoms,)
     importance: np.ndarray = mh_scores.sum(axis=2).sum(axis=0)
 
-    # 대칭 L∞ 정규화: 절댓값 최대로 나눔 (양/음 모두 [-1,1] 범위로)
-    max_abs = np.abs(importance).max()
-    if max_abs > 1e-9:
-        importance = importance / max_abs
+    # Min-Max 정규화 → [0, 1]
+    min_val = float(importance.min())
+    max_val = float(importance.max())
+    if max_val - min_val > 1e-9:
+        importance = (importance - min_val) / (max_val - min_val)
+    else:
+        # 모든 원자가 동일한 중요도 → 변별 불가 → 전부 0 처리 (하이라이트 없음)
+        importance = np.zeros_like(importance)
 
     return importance.astype(np.float32)
 
@@ -148,7 +156,7 @@ def extract_top_maccs_patterns(
     MACCS 패턴별 총 어텐션 기여도에서 상위 k개 추출.
 
     Args:
-        mh_scores: (num_heads, n_atoms, 166) float32
+        mh_scores: (num_heads, n_atoms, 166) float32, 모든 값 ≥ 0 (relu 적용됨)
                    axis-2 인덱스 0 == MACCS bit 1, ..., 인덱스 165 == MACCS bit 166
         top_k    : 반환할 패턴 수 (기본 3)
 
@@ -166,8 +174,8 @@ def extract_top_maccs_patterns(
     if mh_scores.size == 0:
         return []
 
-    # 양의 differential 기여만 MACCS 패턴 랭킹에 사용 (독성 기여 패턴 추출 목적)
-    # extract_mh_scores_numpy()는 부호 보존 상태이므로 여기서 로컬 relu 적용.
+    # mh_scores는 extract_mh_scores_numpy()에서 이미 relu 적용됨.
+    # np.maximum으로 부동소수 오차 보호 차원에서 한 번 더 적용.
     relu_scores = np.maximum(mh_scores, 0.0)
 
     # (h, n_atoms, 166) → sum(heads, atoms) → (166,)
@@ -206,31 +214,40 @@ def extract_top_maccs_patterns(
 def render_xai_svg(
     smiles: str,
     atom_importance: np.ndarray,
+    prob: float,
     threshold: float = HIGHLIGHT_THRESHOLD,
     width: int = 600,
     height: int = 400,
 ) -> str:
     """
-    원자 중요도 기반 발산형(Red-Blue) 하이라이트 분자 SVG 생성.
+    원자 중요도 기반 단색 그라디언트 하이라이트 분자 SVG 생성.
 
     Args:
         smiles         : Canonical SMILES
-        atom_importance: (n_atoms,) float32, 대칭 정규화된 [-1, 1]
-                         양수 → 독성 기여, 음수 → 보호 기여
-        threshold      : |importance| 최소 임계값 (기본 0.10)
+        atom_importance: (n_atoms,) float32, Min-Max 정규화된 [0, 1]
+        prob           : DILI 예측 확률 (0.0 ~ 100.0 %)
+                         > 45.0  → 빨강 계열 하이라이트 (독성 예측)
+                         ≤ 45.0  → 파랑 계열 하이라이트 (안전 예측)
+        threshold      : 하이라이트 최소 중요도 임계값 — 이하 원자는 무색 처리
         width, height  : SVG 픽셀 크기
 
     Returns:
         SVG 문자열 (<?xml ...> 헤더 포함, 직접 <div>에 삽입 가능)
 
-    Color scheme (발산형):
-        imp > 0  (독성 기여) → 빨강 그라디언트: (1.0, 1-0.8*imp, 1-0.8*imp)
-          imp=0.10 → (1.0, 0.92, 0.92)  연한 분홍
-          imp=1.00 → (1.0, 0.20, 0.20)  진한 빨강
-        imp < 0  (보호 기여) → 파랑 그라디언트: (1+0.8*imp, 1+0.8*imp, 1.0)
-          imp=-0.10 → (0.92, 0.92, 1.0)  연한 하늘
-          imp=-1.00 → (0.20, 0.20, 1.0)  진한 파랑
-        |imp| < threshold → 무색
+    Color scheme:
+        color_val = max(0.0, 1.0 - imp * 0.8)   (imp ∈ (threshold, 1.0])
+
+        독성 예측 (prob > 45.0) → 빨강:
+          imp=0.15 → color_val=0.88 → (1.0, 0.88, 0.88)  연한 분홍
+          imp=0.50 → color_val=0.60 → (1.0, 0.60, 0.60)  중간 빨강
+          imp=1.00 → color_val=0.20 → (1.0, 0.20, 0.20)  진한 빨강
+
+        안전 예측 (prob ≤ 45.0) → 파랑:
+          imp=0.15 → color_val=0.88 → (0.88, 0.88, 1.0)  연한 파랑
+          imp=0.50 → color_val=0.60 → (0.60, 0.60, 1.0)  중간 파랑
+          imp=1.00 → color_val=0.20 → (0.20, 0.20, 1.0)  진한 파랑
+
+        imp ≤ threshold → 무색 (하이라이트 제외)
 
     Raises:
         ValueError: SMILES 파싱 실패 시
@@ -244,9 +261,9 @@ def render_xai_svg(
         raise ValueError(f"Cannot parse SMILES for XAI SVG: {smiles!r}")
 
     n_atoms = mol.GetNumAtoms()
+    is_toxic = prob > 45.0
 
     # ── 원자 중요도 배열 길이 보정 ─────────────────────────────────────────
-    # smiles_to_pyg()와 get_maccs()에서 사용하는 canonical SMILES가 동일해야 함
     if len(atom_importance) < n_atoms:
         pad = np.zeros(n_atoms - len(atom_importance), dtype=np.float32)
         atom_importance = np.concatenate([atom_importance, pad])
@@ -260,17 +277,17 @@ def render_xai_svg(
 
     for idx in range(n_atoms):
         imp = float(atom_importance[idx])
-        if abs(imp) < threshold:
+        if imp <= threshold:
             continue
-        if imp > 0.0:
-            # 독성 기여 원자 → 빨강 (imp 클수록 진해짐)
-            g_b = max(0.0, 1.0 - imp * 0.8)
-            atom_color_map[idx] = (1.0, g_b, g_b)
+
+        color_val = max(0.0, 1.0 - imp * 0.8)
+
+        if is_toxic:
+            atom_color_map[idx] = (1.0, color_val, color_val)  # 빨강
         else:
-            # 보호 기여 원자 → 파랑 (|imp| 클수록 진해짐)
-            r_g = max(0.0, 1.0 + imp * 0.8)   # imp < 0 이므로 1.0 + 음수 = 감소
-            atom_color_map[idx] = (r_g, r_g, 1.0)
-        atom_radius_map[idx] = 0.25 + abs(imp) * 0.20
+            atom_color_map[idx] = (color_val, color_val, 1.0)  # 파랑
+
+        atom_radius_map[idx] = 0.25 + imp * 0.20
         highlight_atoms.append(idx)
 
     # ── 결합 색상 (양 끝 원자가 모두 하이라이트된 경우) ─────────────────
@@ -312,8 +329,9 @@ def render_xai_svg(
 
     svg = drawer.GetDrawingText()
     logger.debug(
-        "render_xai_svg: %d atoms highlighted out of %d (threshold=%.2f)",
-        len(highlight_atoms), n_atoms, threshold,
+        "render_xai_svg: %d/%d atoms highlighted (threshold=%.2f, prob=%.1f%%, %s)",
+        len(highlight_atoms), n_atoms, threshold, prob,
+        "DILI/RED" if is_toxic else "SAFE/BLUE",
     )
     return svg
 
@@ -326,6 +344,7 @@ def build_xai_outputs(
     mh_raw: Optional["torch.Tensor"],  # type: ignore[type-arg]
     smiles: str,
     n_atoms: int,
+    prob: float,
     top_k: int = 3,
 ) -> tuple[list[MaccsPatternScore], str]:
     """
@@ -339,6 +358,7 @@ def build_xai_outputs(
                   또는 None (모델 실패 시 빈 결과 반환)
         smiles  : Canonical SMILES (원자 인덱스 기준으로 사용)
         n_atoms : 실제 원자 수 (PyG 그래프에서 파생)
+        prob    : DILI 예측 확률 (0.0 ~ 100.0 %) — SVG 색상 결정 (빨강/파랑)
         top_k   : 상위 MACCS 패턴 반환 수
 
     Returns:
@@ -349,10 +369,10 @@ def build_xai_outputs(
     Raises:
         RuntimeError: mh_raw 처리 및 SVG 렌더링 모두 실패 시
     """
-    # Step 1: tensor → numpy
+    # Step 1: tensor → numpy (relu 적용)
     mh_scores = extract_mh_scores_numpy(mh_raw, n_atoms)
 
-    # Step 2: 원자 중요도
+    # Step 2: 원자 중요도 (Min-Max [0, 1])
     atom_imp = compute_atom_importance(mh_scores)
 
     # Step 3: MACCS 패턴 기여도
@@ -362,9 +382,9 @@ def build_xai_outputs(
         logger.warning("extract_top_maccs_patterns failed: %s — returning []", exc)
         top_maccs = []
 
-    # Step 4: SVG 렌더링 (실패 시 plain SVG fallback)
+    # Step 4: SVG 렌더링 (prob 기반 색상, 실패 시 plain SVG fallback)
     try:
-        svg = render_xai_svg(smiles, atom_imp)
+        svg = render_xai_svg(smiles, atom_imp, prob)
     except Exception as exc:
         logger.warning(
             "render_xai_svg failed for %r: %s — falling back to plain SVG", smiles[:60], exc
@@ -385,7 +405,8 @@ async def abuild_xai_outputs(
     mh_raw: Optional["torch.Tensor"],  # type: ignore[type-arg]
     smiles: str,
     n_atoms: int,
+    prob: float,
     top_k: int = 3,
 ) -> tuple[list[MaccsPatternScore], str]:
     """build_xai_outputs()의 비동기 래퍼."""
-    return await asyncio.to_thread(build_xai_outputs, mh_raw, smiles, n_atoms, top_k)
+    return await asyncio.to_thread(build_xai_outputs, mh_raw, smiles, n_atoms, prob, top_k)

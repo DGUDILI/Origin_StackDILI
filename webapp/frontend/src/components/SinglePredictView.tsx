@@ -5,17 +5,20 @@
  *  ┌──────────────────────────────────────────────────────────────────┐
  *  │  SMILES 입력창                           [분석하기 버튼]          │
  *  ├──────────────────────────────────────────────────────────────────┤
+ *  │                                      [PDF 리포트 다운로드 버튼]   │
+ *  │  ──────────────────────────── id="dili-report-content" ────────  │
  *  │  좌측 패널 (1/3)              우측 패널 (2/3)                    │
- *  │  ─────────────────            ──────────────────────────────     │
  *  │  RiskGauge                    분자 구조 SVG (XAI 하이라이트)     │
  *  │  Top-3 MACCS 패턴 카드        물리화학 특성 테이블               │
  *  └──────────────────────────────────────────────────────────────────┘
  */
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { FlaskConical, Loader2, AlertCircle, ChevronRight } from 'lucide-react'
+import { FlaskConical, Loader2, AlertCircle, ChevronRight, FileDown } from 'lucide-react'
 import { clsx } from 'clsx'
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 
 import { predictSingle, ApiError } from '@/api/client'
 import { type SinglePredictResponse, type MaccsPattern } from '@/types/predict'
@@ -72,8 +75,9 @@ const EXAMPLES = [
 // ─── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
 
 export default function SinglePredictView() {
-  const [smiles, setSmiles] = useState('')
-  const [result, setResult] = useState<SinglePredictResponse | null>(null)
+  const [smiles, setSmiles]               = useState('')
+  const [result, setResult]               = useState<SinglePredictResponse | null>(null)
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
 
   const mutation = useMutation({
     mutationFn: (s: string) => predictSingle(s.trim(), true),
@@ -92,6 +96,122 @@ export default function SinglePredictView() {
     setResult(null)
     mutation.mutate(s)
   }
+
+  // ── PDF 리포트 생성 ─────────────────────────────────────────────────────────
+  const generatePDF = useCallback(async () => {
+    if (!result || isGeneratingPdf) return
+    setIsGeneratingPdf(true)
+
+    try {
+      const reportEl = document.getElementById('dili-report-content')
+      if (!reportEl) return
+
+      // 1. 라이브 DOM 보호를 위해 클론 생성 후 화면 밖 배치
+      const clone = reportEl.cloneNode(true) as HTMLElement
+      Object.assign(clone.style, {
+        position  : 'absolute',
+        top       : '-99999px',
+        left      : '0px',
+        width     : `${reportEl.offsetWidth}px`,
+        background: '#f8fafc',
+        zIndex    : '-1',
+      })
+      document.body.appendChild(clone)
+
+      // 2. SVG → base64 img 변환
+      //    dangerouslySetInnerHTML로 주입된 SVG는 html2canvas가 올바르게 캡처하지 못하므로
+      //    XMLSerializer로 직렬화 후 data URL img 엘리먼트로 교체
+      const origSvgs  = Array.from(reportEl.querySelectorAll<SVGSVGElement>('svg'))
+      const cloneSvgs = Array.from(clone.querySelectorAll<SVGSVGElement>('svg'))
+
+      await Promise.all(
+        cloneSvgs.map(async (svg, i) => {
+          const rect = origSvgs[i]?.getBoundingClientRect() ?? { width: 600, height: 400 }
+          const w = Math.ceil(rect.width)
+          const h = Math.ceil(rect.height)
+
+          // width/height 명시 (html2canvas 요구사항)
+          svg.setAttribute('width',  `${w}`)
+          svg.setAttribute('height', `${h}`)
+          if (!svg.getAttribute('xmlns')) {
+            svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+          }
+
+          // SVG 문자열 → base64 data URL
+          const svgStr = new XMLSerializer().serializeToString(svg)
+          const bytes  = new TextEncoder().encode(svgStr)
+          let binary   = ''
+          bytes.forEach((b) => { binary += String.fromCharCode(b) })
+          const dataUrl = `data:image/svg+xml;base64,${btoa(binary)}`
+
+          const img = document.createElement('img')
+          img.src             = dataUrl
+          img.width           = w
+          img.height          = h
+          img.style.cssText   = `display:block;width:${w}px;height:${h}px;`
+
+          await new Promise<void>((resolve) => {
+            if (img.complete) { resolve(); return }
+            img.onload  = () => resolve()
+            img.onerror = () => resolve()  // 실패 시에도 진행
+          })
+
+          svg.parentNode?.replaceChild(img, svg)
+        }),
+      )
+
+      // 3. html2canvas 캡처 (scale 2배 = 고해상도)
+      const canvas = await html2canvas(clone, {
+        scale          : 2,
+        useCORS        : true,
+        allowTaint     : false,
+        backgroundColor: '#f8fafc',
+        logging        : false,
+        imageTimeout   : 15_000,
+      })
+      document.body.removeChild(clone)
+
+      // 4. jsPDF A4 출력 (컨텐츠 높이에 따라 자동 페이지 분할)
+      const pdf     = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+      const MARGIN  = 10
+      const PAGE_W  = pdf.internal.pageSize.getWidth()  - MARGIN * 2
+      const PAGE_H  = pdf.internal.pageSize.getHeight() - MARGIN * 2
+      const scale   = PAGE_W / canvas.width
+      const pxPerPage = PAGE_H / scale  // 한 페이지에 해당하는 캔버스 픽셀 행 수
+
+      let srcY = 0
+      let isFirstPage = true
+      while (srcY < canvas.height) {
+        if (!isFirstPage) pdf.addPage()
+
+        const sliceH = Math.min(pxPerPage, canvas.height - srcY)
+        const slice  = document.createElement('canvas')
+        slice.width  = canvas.width
+        slice.height = Math.ceil(sliceH)
+        slice.getContext('2d')!.drawImage(
+          canvas, 0, srcY, canvas.width, sliceH,
+          0, 0, canvas.width, sliceH,
+        )
+
+        pdf.addImage(
+          slice.toDataURL('image/png'),
+          'PNG', MARGIN, MARGIN, PAGE_W, sliceH * scale,
+        )
+
+        srcY += sliceH
+        isFirstPage = false
+      }
+
+      // 5. 파일명: DILI_Analysis_Report_[canonical SMILES].pdf
+      const safeSmiles = result.canonical_smiles.replace(/[^\w]/g, '_').slice(0, 40)
+      pdf.save(`DILI_Analysis_Report_${safeSmiles}.pdf`)
+
+    } catch (err) {
+      console.error('PDF 생성 오류:', err)
+    } finally {
+      setIsGeneratingPdf(false)
+    }
+  }, [result, isGeneratingPdf])
 
   const isPending = mutation.isPending
   const apiError  = mutation.error instanceof ApiError ? mutation.error : null
@@ -193,76 +313,118 @@ export default function SinglePredictView() {
 
       {/* ── 결과 패널 ────────────────────────────────────────────────────────── */}
       {result && !isPending && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 animate-fade-in">
+        <>
+          {/* PDF 다운로드 버튼 (캡처 영역 외부 — PDF에 포함되지 않음) */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              분석이 완료되었습니다.&nbsp;
+              <span className="font-mono text-slate-500">{result.canonical_smiles}</span>
+            </p>
+            <button
+              onClick={generatePDF}
+              disabled={isGeneratingPdf}
+              className={clsx(
+                'inline-flex flex-shrink-0 items-center gap-2 rounded-lg px-4 py-2',
+                'text-sm font-semibold transition-all duration-150 shadow-sm',
+                isGeneratingPdf
+                  ? 'cursor-not-allowed bg-slate-100 text-slate-400'
+                  : 'bg-slate-800 text-white hover:bg-slate-700 active:scale-[0.97]',
+              )}
+              aria-label="PDF 리포트 다운로드"
+            >
+              {isGeneratingPdf ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  PDF 생성 중…
+                </>
+              ) : (
+                <>
+                  <FileDown className="h-4 w-4" />
+                  PDF 리포트 다운로드
+                </>
+              )}
+            </button>
+          </div>
 
-          {/* 좌측: 위험도 + MACCS 패턴 */}
-          <div className="space-y-4 lg:col-span-1">
+          {/* ── PDF 캡처 대상 영역 (id="dili-report-content") ────────────── */}
+          <div
+            id="dili-report-content"
+            className="grid grid-cols-1 gap-6 lg:grid-cols-3 animate-fade-in"
+          >
 
-            {/* 위험도 게이지 카드 */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="mb-4 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                DILI 위험도
-              </h3>
-              <RiskGauge
-                probability={result.probability}
-                riskLevel={result.risk_level}
-              />
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-                  Canonical SMILES
-                </p>
-                <p className="mt-1 text-center font-mono text-[11px] text-slate-600 break-all leading-relaxed">
-                  {result.canonical_smiles}
-                </p>
-              </div>
-            </div>
+            {/* 좌측: 위험도 + MACCS 패턴 */}
+            <div className="space-y-4 lg:col-span-1">
 
-            {/* Top-3 MACCS 독성 패턴 */}
-            {result.top_maccs_patterns.length > 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                  주요 독성 기여 패턴
+              {/* 위험도 게이지 카드 */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-4 text-sm font-semibold text-slate-500 uppercase tracking-wide">
+                  DILI 위험도
                 </h3>
-                <div className="space-y-2.5">
-                  {result.top_maccs_patterns.map((p, i) => (
-                    <MaccsPatternCard key={p.bit_index} pattern={p} rank={i + 1} />
-                  ))}
+                <RiskGauge
+                  probability={result.probability}
+                  riskLevel={result.risk_level}
+                />
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+                    Canonical SMILES
+                  </p>
+                  <p className="mt-1 text-center font-mono text-[11px] text-slate-600 break-all leading-relaxed">
+                    {result.canonical_smiles}
+                  </p>
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* 우측: 분자 구조 + 물성치 */}
-          <div className="space-y-4 lg:col-span-2">
-
-            {/* 분자 구조 SVG (XAI 하이라이트) */}
-            {result.molecule_svg && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                  분자 구조 (XAI 원자 기여도 오버레이)
-                </h3>
-                <div
-                  className="molecule-svg flex justify-center overflow-hidden rounded-lg bg-slate-50/50"
-                  /* SVG는 백엔드 RDKit 렌더링 결과이므로 안전. 외부 입력 SMILES는 이미 유효성 검증됨. */
-                  dangerouslySetInnerHTML={{ __html: sanitizeSvg(result.molecule_svg) }}
-                  aria-label="XAI 원자 기여도 분자 구조 이미지"
-                />
-                <p className="mt-2 text-center text-[11px] text-slate-400">
-                  빨간색 → 독성 기여도 높은 원자 / 흰색 → 낮은 기여도
-                </p>
-              </div>
-            )}
-
-            {/* 물리화학 특성 테이블 */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                물리화학 특성
-              </h3>
-              <PhysChemTable data={result.physicochemical} />
+              {/* Top-3 MACCS 독성 패턴 */}
+              {result.top_maccs_patterns.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
+                    주요 독성 기여 패턴
+                  </h3>
+                  <div className="space-y-2.5">
+                    {result.top_maccs_patterns.map((p, i) => (
+                      <MaccsPatternCard key={p.bit_index} pattern={p} rank={i + 1} />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* 우측: 분자 구조 + 물성치 */}
+            <div className="space-y-4 lg:col-span-2">
+
+              {/* 분자 구조 SVG (XAI 하이라이트) */}
+              {result.molecule_svg && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
+                    분자 구조 (XAI 원자 기여도 오버레이)
+                  </h3>
+                  <div
+                    className="molecule-svg flex justify-center overflow-hidden rounded-lg bg-slate-50/50"
+                    /* SVG는 백엔드 RDKit 렌더링 결과이므로 안전. 외부 입력 SMILES는 이미 유효성 검증됨. */
+                    dangerouslySetInnerHTML={{ __html: sanitizeSvg(result.molecule_svg) }}
+                    aria-label="XAI 원자 기여도 분자 구조 이미지"
+                  />
+                  <p className="mt-2 text-center text-[11px] text-slate-400">
+                    {result.risk_level === 'HIGH'
+                      ? '빨간색 → 독성 기여도 높은 원자'
+                      : '파란색 → 어텐션 집중 원자'
+                    }
+                    &nbsp;/&nbsp;흰색 → 낮은 기여도
+                  </p>
+                </div>
+              )}
+
+              {/* 물리화학 특성 테이블 */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
+                  물리화학 특성
+                </h3>
+                <PhysChemTable data={result.physicochemical} />
+              </div>
+
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* ── 초기 안내 메시지 (결과·로딩·에러 없을 때) ───────────────────────── */}

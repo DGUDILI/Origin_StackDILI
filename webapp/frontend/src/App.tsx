@@ -3,10 +3,10 @@
  *
  * 구조:
  *  ┌──────────────────────── Header ────────────────────────────────────┐
- *  │  [FlaskConical] DGUDILI   [단일 분석] [배치 스크리닝]   모델 배지  │
+ *  │  [FlaskConical] DGUDILI   [단일 분석] [배치 스크리닝] [모델 소개]  │
  *  └───────────────────────────────────────────────────────────────────┘
  *  ┌──────────────────────── Main ──────────────────────────────────────┐
- *  │  <SinglePredictView />  또는  <BatchScreeningView />               │
+ *  │  <SinglePredictView /> | <BatchScreeningView /> | <ModelInfoView />│
  *  └───────────────────────────────────────────────────────────────────┘
  *  ┌──────────────────────── Footer ────────────────────────────────────┐
  *  │  DGUDILI 2026 · GINEConv + ChemBERTa + DiffAttn                   │
@@ -19,6 +19,7 @@ import { clsx } from 'clsx'
 
 import SinglePredictView   from '@/components/SinglePredictView'
 import BatchScreeningView  from '@/components/BatchScreeningView'
+import ModelInfoView       from '@/components/ModelInfoView'
 
 // ─── 탭 링크 스타일 ───────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ export default function App() {
 
           {/* 탭 내비게이션 */}
           <nav className="flex gap-1" role="tablist" aria-label="분석 모드">
+            <NavLink to="/about"     className={tabCls} role="tab">모델 소개</NavLink>
             <NavLink to="/"      end className={tabCls} role="tab">단일 분석</NavLink>
             <NavLink to="/batch"     className={tabCls} role="tab">배치 스크리닝</NavLink>
           </nav>
@@ -75,7 +77,8 @@ export default function App() {
         <Routes>
           <Route path="/"      element={<SinglePredictView />} />
           <Route path="/batch" element={<BatchScreeningView />} />
-          <Route path="*"      element={<Navigate to="/" replace />} />
+          <Route path="/about" element={<ModelInfoView />} />
+          <Route path="*"      element={<Navigate to="/about" replace />} />
         </Routes>
       </main>
 
