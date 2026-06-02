@@ -1,0 +1,47 @@
+# Python 캐시 및 컴파일 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경 (Virtual Environments) 및 콘다 환경
+.venv/
+venv/
+env/
+ENV/
+.conda/
+.env
+
+# 프로젝트 및 IDE 설정 파일
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS 및 로그 파일
+.DS_Store
+Thumbs.db
+*.log
+
+# 데이터 및 아티팩트 (필요시 활성화)
+# outputs/
+# *.pt
+# *.pkl
+
+# node_modules 절대 제외 (프론트엔드 의존성)
+node_modules/
+**/node_modules/
+
+# 빌드 결과물 및 임시 파편 제외
+dist/
+**/dist/
+.vite/
+**/.vite/
+.eslintcache
+
+# 파이썬 가상환경 및 캐시 확실히 고정
+.venv/
+venv/
+**/__pycache__/

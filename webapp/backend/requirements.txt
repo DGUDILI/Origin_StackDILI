@@ -1,0 +1,62 @@
+# =============================================================================
+# DGUDILI Web Backend — Python Dependencies
+# =============================================================================
+#
+# PyTorch CPU-only 설치 주의사항:
+#   ECS Fargate는 GPU 미지원이므로 CPU 전용 wheel을 사용합니다.
+#   Dockerfile에서 아래 순서로 설치합니다:
+#
+#     1) pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+#     2) pip install torch-geometric==2.5.3
+#     3) pip install -r requirements.txt
+#
+#   로컬 GPU 환경에서 사용 시 torch를 별도 설치하고 device=cuda 설정.
+# =============================================================================
+
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+
+# ── Pydantic v2 + Settings ────────────────────────────────────────────────────
+pydantic==2.9.2
+pydantic-settings==2.5.2
+annotated-types==0.7.0
+
+# ── PyTorch (CPU) — Dockerfile에서 별도 설치 (위 주의사항 참고) ──────────────
+# torch==2.3.1
+# torch-geometric==2.5.3
+
+# ── Transformers / ChemBERTa ──────────────────────────────────────────────────
+transformers==4.44.2
+tokenizers==0.19.1
+safetensors==0.4.5
+huggingface-hub==0.24.6
+filelock==3.15.4
+
+# ── Chemistry (RDKit + Attention Utility) ─────────────────────────────────────
+rdkit==2024.03.5
+einops==0.8.0
+
+# ── Numerical / Data ──────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.13.1
+
+# ── AWS SDK ───────────────────────────────────────────────────────────────────
+boto3==1.35.37
+botocore==1.35.37
+s3transfer==0.10.2
+
+# ── HTTP / Async Utilities ────────────────────────────────────────────────────
+httpx==0.27.2
+anyio==4.6.0
+#starlette==0.41.2   # fastapi의 의존성 — 버전 고정으로 호환성 보장
+
+# ── Logging / Typing ──────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+typing-extensions==4.12.2
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.3.3
+pytest-asyncio==0.24.0
