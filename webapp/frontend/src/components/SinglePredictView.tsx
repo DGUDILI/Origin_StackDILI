@@ -199,7 +199,7 @@ export default function SinglePredictView() {
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center gap-2">
           <FlaskConical className="h-5 w-5 text-blue-500" />
-          <h2 className="text-base font-semibold text-slate-800">SMILES 입력</h2>
+          <h2 className="text-base font-semibold text-slate-800">분자 입력</h2>
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-3">
@@ -208,7 +208,7 @@ export default function SinglePredictView() {
               type="text"
               value={smiles}
               onChange={(e) => setSmiles(e.target.value)}
-              placeholder="SMILES를 입력하세요 (예: CC(=O)Oc1ccccc1C(=O)O)"
+              placeholder="SMILES 또는 영문 분자 이름 입력 (예: CC(=O)Oc1ccccc1C(=O)O 또는 Aspirin)"
               className={clsx(
                 'w-full rounded-lg border px-4 py-2.5 font-mono text-sm',
                 'placeholder-slate-300 outline-none transition-all',
@@ -272,6 +272,19 @@ export default function SinglePredictView() {
           ))}
         </div>
       </div>
+
+      {/* ── 에러 배너 (유효하지 않은 SMILES 또는 분자 이름) ─────────────────── */}
+      {!result && !isPending && mutation.isError && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-5">
+          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" />
+          <div>
+            <p className="text-sm font-semibold text-red-700">분석을 수행할 수 없습니다</p>
+            <p className="mt-1 text-sm text-red-600">
+              {apiError?.message ?? '알 수 없는 오류가 발생했습니다.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── 로딩 스켈레톤 ────────────────────────────────────────────────────── */}
       {isPending && (

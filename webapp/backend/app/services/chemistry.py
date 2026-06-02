@@ -13,6 +13,16 @@ from typing import TypedDict
 
 logger = logging.getLogger(__name__)
 
+# RDKit C++ 레벨 stderr 출력 비활성화.
+# Chem.MolFromSmiles()가 잘못된 문자열을 받으면 C++ 내부에서 직접 stderr에
+# "[SMILES Parse Error: ...]" 를 출력하는데, 이는 Python 예외가 아니라
+# 순수 터미널 노이즈다. Python 레벨 에러 처리는 아래 함수들의 try-except가 담당.
+try:
+    from rdkit import RDLogger as _RDLogger
+    _RDLogger.DisableLog('rdApp.*')
+except Exception:
+    pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 타입 정의
@@ -169,6 +179,77 @@ def smiles_to_svg_plain(
         return drawer.GetDrawingText()
     except Exception as exc:
         raise ValueError(f"RDKit SVG rendering failed for {smiles!r}: {exc}") from exc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PubChem 분자 이름 → SMILES 변환
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_smiles_from_pubchem(molecule_name: str) -> str | None:
+    """
+    PubChem PUG REST API로 분자 이름을 SMILES로 변환 (동기).
+
+    URL: https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/CanonicalSMILES/JSON
+
+    Returns:
+        CanonicalSMILES 문자열, 조회 실패(404 등) 시 None
+    """
+    import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    name_encoded = urllib.parse.quote(molecule_name.strip())
+    url = (
+        f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
+        f"{name_encoded}/property/CanonicalSMILES/JSON"
+    )
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "DGUDILI/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            props = data["PropertyTable"]["Properties"][0]
+            # PubChem은 URL에서 CanonicalSMILES를 요청해도 응답 키가
+            # 버전에 따라 다르게 내려온다. 확인된 키 이름 순서로 시도:
+            #   CanonicalSMILES  — 구버전 응답
+            #   CanonicalSmiles  — 대소문자 변형
+            #   ConnectivitySMILES — 2024+ PubChem 응답 키 (이름 변경)
+            #   IsomericSMILES   — 입체화학 포함 최후 폴백
+            smiles = (
+                props.get("CanonicalSMILES")
+                or props.get("CanonicalSmiles")
+                or props.get("ConnectivitySMILES")
+                or props.get("IsomericSMILES")
+            )
+            if not smiles:
+                logger.warning(
+                    "PubChem response missing SMILES key for %r — keys: %s",
+                    molecule_name[:40], list(props.keys()),
+                )
+                return None
+            logger.info(
+                "PubChem resolved %r → SMILES %r",
+                molecule_name[:40], smiles[:60],
+            )
+            return smiles
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            logger.debug("PubChem: %r not found (404)", molecule_name[:40])
+        else:
+            logger.warning(
+                "PubChem HTTP error for %r: %s %s",
+                molecule_name[:40], exc.code, exc.reason,
+            )
+    except Exception as exc:
+        logger.warning("PubChem lookup failed for %r: %s", molecule_name[:40], exc)
+
+    return None
+
+
+async def name_to_smiles_via_pubchem(molecule_name: str) -> str | None:
+    """_fetch_smiles_from_pubchem()의 비동기 래퍼."""
+    return await asyncio.to_thread(_fetch_smiles_from_pubchem, molecule_name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
