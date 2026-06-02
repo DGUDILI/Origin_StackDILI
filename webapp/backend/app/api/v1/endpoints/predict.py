@@ -20,6 +20,7 @@ api/v1/endpoints/predict.py — DILI 예측 HTTP 엔드포인트
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from typing import Annotated
@@ -35,6 +36,7 @@ from app.services.batch_runner import (
     get_task,
     run_batch,
 )
+from app.services.chemistry import name_to_smiles_via_pubchem, validate_and_canonicalize
 from app.services.inference import InferenceError, InvalidSmilesError, predict_single
 
 logger = logging.getLogger(__name__)
@@ -71,15 +73,42 @@ async def predict_single_endpoint(
     """
     단일 분자 DILI 예측.
 
+    - 입력값이 유효한 SMILES이면 그대로 사용
+    - 유효하지 않은 SMILES이면 PubChem PUG REST API로 분자 이름 조회 시도
+    - 두 경우 모두 실패하면 400 Bad Request 반환
     - `include_xai=true` (기본): SVG 하이라이트 + MACCS 패턴 포함
     - `include_xai=false`: 확률/물성치만 반환 (빠른 응답)
     """
+    # ── 입력 검증: SMILES 또는 영문 분자 이름 처리 ────────────────────────
+    smiles_to_use = request.smiles
+
+    # validate_and_canonicalize 내부에서 이미 모든 예외를 잡아 None을 반환하지만,
+    # asyncio.to_thread 호출 자체에서 예기치 않은 오류가 발생할 경우에도
+    # PubChem 경로로 안전하게 폴백하도록 한 겹 더 방어한다.
     try:
-        result = await predict_single(request.smiles, include_xai=request.include_xai)
+        canonical_check = await asyncio.to_thread(validate_and_canonicalize, request.smiles)
+    except Exception as exc:
+        logger.warning("validate_and_canonicalize raised unexpectedly for %r: %s", request.smiles[:40], exc)
+        canonical_check = None
+
+    if canonical_check is None:
+        logger.info("[PubChem] %r is not valid SMILES — querying PubChem by name", request.smiles[:40])
+        pubchem_smiles = await name_to_smiles_via_pubchem(request.smiles)
+        if pubchem_smiles is None:
+            logger.info("[PubChem] lookup failed for %r — returning 400", request.smiles[:40])
+            raise HTTPException(
+                status_code=400,
+                detail="유효하지 않은 SMILES 구조식이거나 존재하지 않는 분자 이름입니다.",
+            )
+        logger.info("[PubChem] resolved %r → SMILES %r", request.smiles[:40], pubchem_smiles[:60])
+        smiles_to_use = pubchem_smiles
+
+    try:
+        result = await predict_single(smiles_to_use, include_xai=request.include_xai)
     except InvalidSmilesError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except InferenceError as exc:
-        logger.error("InferenceError for SMILES %r: %s", request.smiles[:60], exc)
+        logger.error("InferenceError for SMILES %r: %s", smiles_to_use[:60], exc)
         raise HTTPException(
             status_code=500,
             detail=f"모델 추론 중 오류가 발생했습니다: {exc}",
