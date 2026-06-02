@@ -49,6 +49,18 @@ class MaccsPattern(BaseModel):
     )
 
 
+class ToxicReason(BaseModel):
+    """SMARTS 매핑된 작용기 하나의 독성 기여 정보."""
+    rank: int = Field(..., ge=1, description="기여도 순위 (1 = 가장 높음)")
+    name: str = Field(..., description="작용기 이름 (예: Benzene Ring, Hydroxyl)")
+    contribution: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="전체 원자 중요도 대비 기여율 (0.0 ~ 100.0 %)",
+    )
+
+
 class PhysChemProps(BaseModel):
     """RDKit Descriptors 기반 물리화학 특성."""
     molecular_weight: float = Field(..., description="정확 분자량 (ExactMolWt, Da)")
@@ -107,4 +119,8 @@ class SinglePredictResponse(BaseModel):
     molecule_svg: str = Field(
         default="",
         description="XAI 원자 하이라이트가 포함된 RDKit SVG 문자열. include_xai=False 시 빈 문자열.",
+    )
+    toxic_reasons: list[ToxicReason] = Field(
+        default_factory=list,
+        description="SMARTS 기반 작용기 독성 기여도 상위 3개 순위. include_xai=False 시 빈 배열.",
     )

@@ -35,13 +35,13 @@ import torch
 from app.core.config import settings
 from app.core.model_loader import get_device, get_inference_lock, get_model, get_tokenizer
 from app.ml.graph_utils import get_maccs, smiles_to_pyg
-from app.schemas.predict import MaccsPattern, PhysChemProps, SinglePredictResponse
+from app.schemas.predict import MaccsPattern, PhysChemProps, SinglePredictResponse, ToxicReason
 from app.services.chemistry import (
     get_physicochemical_props,
     smiles_to_svg_plain,
     validate_and_canonicalize,
 )
-from app.services.xai import MaccsPatternScore, abuild_xai_outputs
+from app.services.xai import MaccsPatternScore, ToxicReasonData, abuild_xai_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ def _run_model_inference(
     smiles: str,
     canonical: str,
     include_xai: bool,
-) -> tuple[float, list[MaccsPatternScore], str]:
+) -> tuple[float, list[MaccsPatternScore], str, list[ToxicReasonData]]:
     """
     동기 추론 함수 전체. asyncio.to_thread()로 오프로드됩니다.
 
@@ -165,7 +165,7 @@ def _run_model_inference(
     Lock 외부:  XAI numpy 처리, RDKit SVG 렌더링, 물성치 계산
 
     Returns:
-        (probability_pct, top_maccs, molecule_svg)
+        (probability_pct, top_maccs, molecule_svg, toxic_reasons)
 
     Raises:
         InferenceError
@@ -185,11 +185,11 @@ def _run_model_inference(
     # ── Lock 해제 후: XAI (numpy/RDKit, thread-safe) ──────────────────────
     top_maccs: list[MaccsPatternScore] = []
     svg = ""
+    toxic_reasons: list[ToxicReasonData] = []
 
     if include_xai:
         try:
-            # probability_pct를 함께 전달 — SVG 색상(빨강/파랑) 결정에 사용
-            top_maccs, svg = _run_xai_sync(mh_raw, canonical, n_atoms, probability_pct)
+            top_maccs, svg, toxic_reasons = _run_xai_sync(mh_raw, canonical, n_atoms, probability_pct)
         except Exception as exc:
             logger.warning(
                 "XAI processing failed for %r: %s — using plain SVG fallback",
@@ -207,7 +207,7 @@ def _run_model_inference(
         except Exception as exc:
             logger.warning("Plain SVG generation failed: %s", exc)
 
-    return probability_pct, top_maccs, svg
+    return probability_pct, top_maccs, svg, toxic_reasons
 
 
 def _run_xai_sync(
@@ -215,7 +215,7 @@ def _run_xai_sync(
     canonical: str,
     n_atoms: int,
     prob: float,
-) -> tuple[list[MaccsPatternScore], str]:
+) -> tuple[list[MaccsPatternScore], str, list[ToxicReasonData]]:
     """
     XAI 처리 동기 버전 (Lock 외부에서 호출).
     build_xai_outputs와 동일 로직이나, asyncio.to_thread 없이 직접 호출.
@@ -266,7 +266,7 @@ async def predict_single(
 
     # ── Step 2~7: 모델 추론 + XAI (스레드풀 오프로드) ─────────────────────
     try:
-        probability_pct, top_maccs, svg = await asyncio.to_thread(
+        probability_pct, top_maccs, svg, toxic_reasons = await asyncio.to_thread(
             _run_model_inference, smiles, canonical, include_xai
         )
     except (InvalidSmilesError, InferenceError):
@@ -311,6 +311,10 @@ async def predict_single(
         ],
         physicochemical=PhysChemProps(**phys_data),
         molecule_svg=svg,
+        toxic_reasons=[
+            ToxicReason(rank=r.rank, name=r.name, contribution=r.contribution)
+            for r in toxic_reasons
+        ],
     )
 
     logger.info(

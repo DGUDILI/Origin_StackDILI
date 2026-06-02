@@ -21,7 +21,7 @@ import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 
 import { predictSingle, ApiError } from '@/api/client'
-import { type SinglePredictResponse, type MaccsPattern } from '@/types/predict'
+import { type SinglePredictResponse, type MaccsPattern, type ToxicReason } from '@/types/predict'
 import RiskGauge    from '@/components/RiskGauge'
 import PhysChemTable from '@/components/PhysChemTable'
 
@@ -58,6 +58,46 @@ function MaccsPatternCard({ pattern, rank }: { pattern: MaccsPattern; rank: numb
           aria-valuemin={0}
           aria-valuemax={100}
           role="progressbar"
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── 독성 원인 작용기 카드 ────────────────────────────────────────────────────
+
+const RANK_STYLES = [
+  { border: 'border-red-200',    bg: 'from-red-50 to-orange-50',    badge: 'bg-red-100 text-red-700',    bar: 'from-red-400 to-orange-400',    medal: '🥇' },
+  { border: 'border-orange-200', bg: 'from-orange-50 to-amber-50',  badge: 'bg-orange-100 text-orange-700', bar: 'from-orange-400 to-amber-400', medal: '🥈' },
+  { border: 'border-amber-200',  bg: 'from-amber-50 to-yellow-50',  badge: 'bg-amber-100 text-amber-700',  bar: 'from-amber-400 to-yellow-400',  medal: '🥉' },
+] as const
+
+function ToxicReasonCard({ reason }: { reason: ToxicReason }) {
+  const style = RANK_STYLES[Math.min(reason.rank - 1, RANK_STYLES.length - 1)]
+  return (
+    <div className={`rounded-lg border ${style.border} bg-gradient-to-br ${style.bg} p-3.5`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-base leading-none">{style.medal}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${style.badge}`}>
+            {reason.rank}순위
+          </span>
+        </div>
+        <span className="tabular-nums text-xs font-bold text-slate-600">
+          {reason.contribution.toFixed(1)}%
+        </span>
+      </div>
+      <p className="mb-2.5 text-[11px] font-semibold leading-snug text-slate-700">
+        {reason.name}
+      </p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/60">
+        <div
+          className={`h-full rounded-full bg-gradient-to-r ${style.bar} transition-all duration-700`}
+          style={{ width: `${Math.min(reason.contribution, 100)}%` }}
+          role="progressbar"
+          aria-valuenow={reason.contribution}
+          aria-valuemin={0}
+          aria-valuemax={100}
         />
       </div>
     </div>
@@ -363,15 +403,18 @@ export default function SinglePredictView() {
                 </div>
               </div>
 
-              {/* Top-3 MACCS 독성 패턴 */}
-              {result.top_maccs_patterns.length > 0 && (
+              {/* 독성 원인 작용기 TOP 3 */}
+              {result.toxic_reasons.length > 0 && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                    주요 독성 기여 패턴
+                  <h3 className="mb-1 text-sm font-semibold text-slate-500 uppercase tracking-wide">
+                    독성 원인 작용기 TOP {result.toxic_reasons.length}
                   </h3>
+                  <p className="mb-3 text-[10px] text-slate-400">
+                    AI 어텐션 기반 SMARTS 구조 매핑
+                  </p>
                   <div className="space-y-2.5">
-                    {result.top_maccs_patterns.map((p, i) => (
-                      <MaccsPatternCard key={p.bit_index} pattern={p} rank={i + 1} />
+                    {result.toxic_reasons.map((r) => (
+                      <ToxicReasonCard key={r.rank} reason={r} />
                     ))}
                   </div>
                 </div>
@@ -395,10 +438,10 @@ export default function SinglePredictView() {
                   />
                   <p className="mt-2 text-center text-[11px] text-slate-400">
                     {result.risk_level === 'HIGH'
-                      ? '빨간색 → 독성 기여도 높은 원자'
-                      : '파란색 → 어텐션 집중 원자'
+                      ? '🔴 빨간색 → 독성 기여 원자 (진할수록 강함)'
+                      : '🔵 파란색 → 어텐션 집중 원자'
                     }
-                    &nbsp;/&nbsp;흰색 → 낮은 기여도
+                    &nbsp;·&nbsp;흰색 → 낮은 기여도
                   </p>
                 </div>
               )}

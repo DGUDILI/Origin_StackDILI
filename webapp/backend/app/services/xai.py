@@ -46,6 +46,14 @@ class MaccsPatternScore:
     importance: float # 전체 어텐션 대비 기여 비율 (0 ~ 1)
 
 
+@dataclass(frozen=True)
+class ToxicReasonData:
+    """SMARTS 매핑된 작용기 하나의 독성 기여 정보."""
+    rank: int           # 1-indexed 순위 (1 = 가장 높은 기여)
+    name: str           # 작용기 이름 (예: "Benzene Ring")
+    contribution: float # 전체 원자 중요도 대비 기여율 (0.0 ~ 100.0 %)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1: 모델 어텐션 텐서 → numpy 변환
 # ─────────────────────────────────────────────────────────────────────────────
@@ -337,6 +345,155 @@ def render_xai_svg(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SMARTS 기반 작용기 독성 기여도 분석
+# ─────────────────────────────────────────────────────────────────────────────
+
+# (작용기 이름, RDKit SMARTS 패턴) 우선순위 목록
+# 패턴이 겹쳐도 허용 — 점수는 원자 중요도 합산으로 독립 계산
+SMARTS_FG_LIST: list[tuple[str, str]] = [
+    ("Benzene Ring",       "c1ccccc1"),
+    ("Phenol",             "[OH]c"),
+    ("Carboxyl (-COOH)",   "[CX3](=O)[OX2H1]"),
+    ("Ester",              "[CX3](=O)[OX2][#6]"),
+    ("Amide",              "[CX3](=O)[NX3]"),
+    ("Hydroxyl (-OH)",     "[CX4][OX2H1]"),
+    ("Amine (-NH₂)",       "[NX3;H2;!$(NC=O)]"),
+    ("Nitro (-NO₂)",       "[N+](=O)[O-]"),
+    ("Halogen",            "[F,Cl,Br,I]"),
+    ("Aldehyde",           "[CX3H1](=O)"),
+    ("Ketone",             "[CX3](=O)[CX4]"),
+    ("Ether (-O-)",        "[OX2]([CX4,c])[CX4,c]"),
+    ("Alkene (C=C)",       "[CX3]=[CX3]"),
+    ("Sulfonamide",        "[SX4](=O)(=O)[NX3]"),
+    ("Acetyl Group",       "[CH3][CX3]=O"),
+    ("Thioether (-S-)",    "[SX2]([CX4])[CX4]"),
+    ("Pyridine Ring",      "c1ccncc1"),
+    ("Imidazole Ring",     "c1cnc[nH]1"),
+]
+
+
+def identify_top_functional_groups(
+    smiles: str,
+    atom_importance: np.ndarray,
+    top_k: int = 3,
+) -> list[ToxicReasonData]:
+    """
+    원자 중요도 기반 독성 기여 작용기 상위 top_k 식별.
+
+    알고리즘:
+      1. SMARTS_FG_LIST 각 패턴으로 분자 내 매칭 원자 집합 탐색
+      2. 매칭 원자들의 atom_importance 합계 계산
+      3. 전체 중요도 합 대비 비율(%) 산출
+      4. 상위 top_k 작용기 반환
+
+    매핑된 작용기가 top_k보다 부족하면:
+      미매핑 고중요도 원자를 "Structural Atom #N"으로 폴백 추가.
+
+    Args:
+        smiles         : Canonical SMILES
+        atom_importance: (n_atoms,) float32, Min-Max 정규화 [0, 1]
+        top_k          : 반환할 최대 순위 수
+
+    Returns:
+        list[ToxicReasonData], rank 오름차순
+    """
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None or atom_importance.size == 0:
+        return []
+
+    n_atoms = mol.GetNumAtoms()
+
+    # 길이 보정 (원자 수 불일치 방어)
+    if len(atom_importance) < n_atoms:
+        atom_importance = np.concatenate([
+            atom_importance,
+            np.zeros(n_atoms - len(atom_importance), dtype=np.float32),
+        ])
+    elif len(atom_importance) > n_atoms:
+        atom_importance = atom_importance[:n_atoms]
+
+    total_importance = float(atom_importance.sum())
+
+    # ── 핵심 수정: 어텐션이 균일하거나 전부 0인 경우 ─────────────────────
+    # compute_atom_importance()는 전원자 어텐션이 같을 때 의도적으로 all-zero를
+    # 반환한다(SVG 하이라이트 억제 목적). 이 값을 그대로 쓰면 total_importance=0
+    # → 기존 early-return이 폴백까지 도달하지 못하고 []를 반환하는 원인.
+    # 해결: 균등 분배(원자당 1.0)로 대체하여 SMARTS/폴백 로직이 정상 동작하도록.
+    if total_importance < 1e-9:
+        atom_importance = np.ones(n_atoms, dtype=np.float32)
+        total_importance = float(n_atoms)
+
+    # 작용기별 점수 계산
+    fg_scores: list[tuple[str, float, frozenset[int]]] = []
+    for fg_name, smarts in SMARTS_FG_LIST:
+        try:
+            pattern = Chem.MolFromSmarts(smarts)
+        except Exception:
+            continue
+        if pattern is None:
+            continue
+
+        matches = mol.GetSubstructMatches(pattern)
+        if not matches:
+            continue
+
+        matched_atoms: set[int] = set()
+        for match in matches:
+            matched_atoms.update(match)
+
+        score = sum(
+            float(atom_importance[i])
+            for i in matched_atoms
+            if i < n_atoms
+        )
+        # 균등 분배 시 score = len(matched_atoms), 항상 양수 → 임계값을 0으로
+        if score > 0:
+            fg_scores.append((fg_name, score, frozenset(matched_atoms)))
+
+    fg_scores.sort(key=lambda x: x[1], reverse=True)
+
+    results: list[ToxicReasonData] = []
+    covered_atoms: set[int] = set()
+
+    for fg_name, score, atoms in fg_scores[:top_k]:
+        results.append(ToxicReasonData(
+            rank=len(results) + 1,
+            name=fg_name,
+            contribution=round(score / total_importance * 100.0, 1),
+        ))
+        covered_atoms.update(atoms)
+
+    # ── 폴백: SMARTS 매핑이 top_k 미만일 때 고중요도 원자로 강제 채우기 ──
+    if len(results) < top_k:
+        remaining = atom_importance.copy()
+        for idx in covered_atoms:
+            if idx < len(remaining):
+                remaining[idx] = 0.0
+
+        while len(results) < top_k:
+            if remaining.max() <= 0:  # 1e-6 → 0: 균등 분배 시도 고려
+                break
+            best_atom = int(np.argmax(remaining))
+            atom_symbol = mol.GetAtomWithIdx(best_atom).GetSymbol()
+            contribution = round(float(remaining[best_atom]) / total_importance * 100.0, 1)
+            results.append(ToxicReasonData(
+                rank=len(results) + 1,
+                name=f"Atom #{best_atom} ({atom_symbol})",
+                contribution=contribution,
+            ))
+            remaining[best_atom] = 0.0
+
+    logger.debug(
+        "identify_top_functional_groups: top-%d for %r → %s",
+        top_k, smiles[:40],
+        [(r.name, r.contribution) for r in results],
+    )
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 퍼사드: 전체 XAI 산출물 생성
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -346,7 +503,7 @@ def build_xai_outputs(
     n_atoms: int,
     prob: float,
     top_k: int = 3,
-) -> tuple[list[MaccsPatternScore], str]:
+) -> tuple[list[MaccsPatternScore], str, list[ToxicReasonData]]:
     """
     모델 멀티헤드 어텐션 텐서로부터 XAI 산출물 전체를 생성하는 파사드.
 
@@ -359,12 +516,13 @@ def build_xai_outputs(
         smiles  : Canonical SMILES (원자 인덱스 기준으로 사용)
         n_atoms : 실제 원자 수 (PyG 그래프에서 파생)
         prob    : DILI 예측 확률 (0.0 ~ 100.0 %) — SVG 색상 결정 (빨강/파랑)
-        top_k   : 상위 MACCS 패턴 반환 수
+        top_k   : 상위 MACCS 패턴 / 작용기 반환 수
 
     Returns:
-        (top_maccs, svg_string)
-        - top_maccs  : list[MaccsPatternScore], importance 내림차순
-        - svg_string : str, XAI 하이라이트 SVG. 실패 시 plain SVG로 fallback.
+        (top_maccs, svg_string, toxic_reasons)
+        - top_maccs     : list[MaccsPatternScore], importance 내림차순
+        - svg_string    : str, XAI 하이라이트 SVG. 실패 시 plain SVG로 fallback.
+        - toxic_reasons : list[ToxicReasonData], SMARTS 기반 작용기 기여도 순위
 
     Raises:
         RuntimeError: mh_raw 처리 및 SVG 렌더링 모두 실패 시
@@ -398,7 +556,16 @@ def build_xai_outputs(
                 f"XAI error: {exc}. Plain SVG error: {fallback_exc}"
             ) from fallback_exc
 
-    return top_maccs, svg
+    # Step 5: SMARTS 기반 작용기 기여도 분석
+    try:
+        toxic_reasons = identify_top_functional_groups(smiles, atom_imp, top_k=top_k)
+    except Exception as exc:
+        logger.warning(
+            "identify_top_functional_groups failed for %r: %s — returning []", smiles[:60], exc
+        )
+        toxic_reasons = []
+
+    return top_maccs, svg, toxic_reasons
 
 
 async def abuild_xai_outputs(
@@ -407,6 +574,6 @@ async def abuild_xai_outputs(
     n_atoms: int,
     prob: float,
     top_k: int = 3,
-) -> tuple[list[MaccsPatternScore], str]:
+) -> tuple[list[MaccsPatternScore], str, list[ToxicReasonData]]:
     """build_xai_outputs()의 비동기 래퍼."""
     return await asyncio.to_thread(build_xai_outputs, mh_raw, smiles, n_atoms, prob, top_k)

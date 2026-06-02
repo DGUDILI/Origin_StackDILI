@@ -42,6 +42,22 @@ export interface SinglePredictRequest {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * SMARTS 기반 작용기 독성 기여 정보
+ * backend: ToxicReason
+ */
+export interface ToxicReason {
+  /** 기여도 순위 (1 = 가장 높음) */
+  rank: number;
+  /** 작용기 이름 (예: "Benzene Ring", "Carboxyl (-COOH)") */
+  name: string;
+  /**
+   * 전체 원자 중요도 대비 기여율 (0.0 ~ 100.0 %)
+   * UI 표시: `${contribution.toFixed(1)}%`
+   */
+  contribution: number;
+}
+
+/**
  * 상위 기여 MACCS 구조 키 하나
  * backend: MaccsPattern
  */
@@ -123,6 +139,11 @@ export interface SinglePredictResponse {
    * UI 렌더링: dangerouslySetInnerHTML={{ __html: molecule_svg }}
    */
   molecule_svg: string;
+  /**
+   * SMARTS 기반 작용기 독성 기여도 상위 3개 순위
+   * include_xai=false 요청 시 빈 배열 []
+   */
+  toxic_reasons: ToxicReason[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
