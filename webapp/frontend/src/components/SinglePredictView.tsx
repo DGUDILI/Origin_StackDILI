@@ -9,7 +9,7 @@
  *  │  ──────────────────────────── id="dili-report-content" ────────  │
  *  │  좌측 패널 (1/3)              우측 패널 (2/3)                    │
  *  │  RiskGauge                    분자 구조 SVG (XAI 하이라이트)     │
- *  │  Top-3 MACCS 패턴 카드        물리화학 특성 테이블               │
+ *  │  독성 원인 작용기 TOP 3 카드   물리화학 특성 테이블               │
  *  └──────────────────────────────────────────────────────────────────┘
  */
 
@@ -21,7 +21,7 @@ import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 
 import { predictSingle, ApiError } from '@/api/client'
-import { type SinglePredictResponse, type MaccsPattern } from '@/types/predict'
+import { type SinglePredictResponse, type ToxicReason } from '@/types/predict'
 import RiskGauge    from '@/components/RiskGauge'
 import PhysChemTable from '@/components/PhysChemTable'
 
@@ -30,34 +30,81 @@ function sanitizeSvg(svg: string): string {
   return svg.replace(/<\?xml[^?]*\?>\s*/g, '').trim()
 }
 
-// ─── MACCS 패턴 카드 ──────────────────────────────────────────────────────────
+// ─── 독성 원인 작용기 카드 (XAI SMARTS 기반) ─────────────────────────────────
 
-function MaccsPatternCard({ pattern, rank }: { pattern: MaccsPattern; rank: number }) {
-  const impPct = (pattern.importance * 100).toFixed(1)
+function ToxicReasonCard({ reason, rank }: { reason: ToxicReason; rank: number }) {
+  const impPct = (reason.importance * 100).toFixed(1)
+  const isTop = rank === 1
+
+  // 작용기 이름인지 원자 레벨 폴백인지 구분 (Atom #N (X) 패턴)
+  const isAtomFallback = /^Atom\s+#\d+/.test(reason.name)
+
   return (
-    <div className="rounded-lg border border-amber-100 bg-gradient-to-br from-amber-50 to-orange-50 p-3.5">
+    <div
+      className={clsx(
+        'rounded-lg border p-3.5 transition-all',
+        isTop
+          ? 'border-red-200 bg-gradient-to-br from-red-50 to-rose-50'
+          : isAtomFallback
+            ? 'border-slate-200 bg-gradient-to-br from-slate-50 to-gray-50'
+            : 'border-orange-100 bg-gradient-to-br from-orange-50 to-amber-50',
+      )}
+    >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-amber-700">
-            bit&nbsp;{pattern.bit_index}
+          {/* 순위 배지 */}
+          <span
+            className={clsx(
+              'rounded px-1.5 py-0.5 text-[10px] font-bold',
+              isTop
+                ? 'bg-red-100 text-red-700'
+                : isAtomFallback
+                  ? 'bg-slate-100 text-slate-500'
+                  : 'bg-orange-100 text-orange-700',
+            )}
+          >
+            #{rank}
           </span>
-          <span className="text-[10px] font-semibold text-amber-400">#{rank}</span>
+          {isAtomFallback && (
+            <span className="text-[9px] text-slate-400 font-medium">(원자 레벨)</span>
+          )}
         </div>
-        <span className="flex-shrink-0 tabular-nums text-xs font-bold text-amber-700">
+        <span
+          className={clsx(
+            'flex-shrink-0 tabular-nums text-xs font-bold',
+            isTop ? 'text-red-700' : isAtomFallback ? 'text-slate-500' : 'text-orange-700',
+          )}
+        >
           {impPct}%
         </span>
       </div>
-      <p className="mb-2.5 text-[11px] font-semibold leading-snug text-slate-700">
-        {pattern.name}
+
+      <p className="mb-2.5 text-[11px] font-semibold leading-snug text-slate-700 break-all">
+        {reason.name}
       </p>
-      <div className="h-1.5 overflow-hidden rounded-full bg-amber-100">
+
+      {/* Progress Bar */}
+      <div
+        className={clsx(
+          'h-1.5 overflow-hidden rounded-full',
+          isTop ? 'bg-red-100' : isAtomFallback ? 'bg-slate-100' : 'bg-orange-100',
+        )}
+      >
         <div
-          className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400 transition-all duration-700"
-          style={{ width: `${pattern.importance * 100}%` }}
-          aria-valuenow={pattern.importance * 100}
+          className={clsx(
+            'h-full rounded-full transition-all duration-700',
+            isTop
+              ? 'bg-gradient-to-r from-red-500 to-rose-400'
+              : isAtomFallback
+                ? 'bg-gradient-to-r from-slate-400 to-gray-400'
+                : 'bg-gradient-to-r from-orange-400 to-amber-400',
+          )}
+          style={{ width: `${Math.min(reason.importance * 100, 100)}%` }}
+          role="progressbar"
+          aria-valuenow={reason.importance * 100}
           aria-valuemin={0}
           aria-valuemax={100}
-          role="progressbar"
+          aria-label={`${reason.name} 기여도 ${impPct}%`}
         />
       </div>
     </div>
@@ -132,10 +179,22 @@ export default function SinglePredictView() {
             .forEach((child) => {
               child.style.animation  = 'none'
               child.style.transition = 'none'
+              child.style.opacity    = '1'
             })
 
-          // dangerouslySetInnerHTML SVG에 명시적 width/height/xmlns 부여
-          // (html2canvas의 SVG 렌더러는 치수가 명시되어야 올바르게 그림)
+          // ── Progress Bar: width 인라인 스타일이 transition 제거 후에도
+          //    유지되도록 명시적으로 재적용 (일부 브라우저에서 누락 방지)
+          clonedDoc
+            .querySelectorAll<HTMLElement>('[role="progressbar"]')
+            .forEach((bar) => {
+              const ariaVal = bar.getAttribute('aria-valuenow')
+              if (ariaVal !== null) {
+                bar.style.width = `${Math.min(parseFloat(ariaVal), 100)}%`
+              }
+            })
+
+          // ── dangerouslySetInnerHTML SVG에 명시적 width/height/xmlns 부여
+          //    (html2canvas의 SVG 렌더러는 치수가 명시되어야 올바르게 그림)
           const origSvgs = Array.from(reportEl.querySelectorAll<SVGSVGElement>('svg'))
           el.querySelectorAll<SVGSVGElement>('svg').forEach((svg, i) => {
             const orig = origSvgs[i]
@@ -146,6 +205,14 @@ export default function SinglePredictView() {
             }
             if (!svg.getAttribute('xmlns')) {
               svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+            }
+            // viewBox 미설정 시 width/height 기반 자동 설정 (크기 왜곡 방지)
+            if (!svg.getAttribute('viewBox')) {
+              const w = svg.getAttribute('width')
+              const h = svg.getAttribute('height')
+              if (w && h) {
+                svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
+              }
             }
           })
         },
@@ -191,6 +258,10 @@ export default function SinglePredictView() {
 
   const isPending = mutation.isPending
   const apiError  = mutation.error instanceof ApiError ? mutation.error : null
+
+  // 데이터 참조 경로 방어: optional chaining으로 TypeError 완전 차단
+  const toxicReasons = result?.toxic_reasons ?? []
+  const moleculeSvg  = result?.molecule_svg ?? ''
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -291,7 +362,7 @@ export default function SinglePredictView() {
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-1 space-y-4">
             <div className="h-56 animate-pulse rounded-2xl bg-slate-100" />
-            <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+            <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
           </div>
           <div className="col-span-2 space-y-4">
             <div className="h-56 animate-pulse rounded-2xl bg-slate-100" />
@@ -341,7 +412,7 @@ export default function SinglePredictView() {
             className="grid grid-cols-1 gap-6 lg:grid-cols-3 animate-fade-in"
           >
 
-            {/* 좌측: 위험도 + MACCS 패턴 */}
+            {/* 좌측: 위험도 + 독성 원인 작용기 TOP 3 */}
             <div className="space-y-4 lg:col-span-1">
 
               {/* 위험도 게이지 카드 */}
@@ -363,26 +434,35 @@ export default function SinglePredictView() {
                 </div>
               </div>
 
-              {/* Top-3 MACCS 독성 패턴 */}
-              {result.top_maccs_patterns.length > 0 && (
+              {/* 독성 원인 작용기 TOP 3 (XAI SMARTS 기반) */}
+              {toxicReasons.length > 0 && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                    주요 독성 기여 패턴
-                  </h3>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">
+                      독성 원인 작용기 TOP {toxicReasons.length}
+                    </h3>
+                    <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-500">
+                      XAI
+                    </span>
+                  </div>
                   <div className="space-y-2.5">
-                    {result.top_maccs_patterns.map((p, i) => (
-                      <MaccsPatternCard key={p.bit_index} pattern={p} rank={i + 1} />
+                    {toxicReasons.map((r, i) => (
+                      <ToxicReasonCard key={`${r.rank}-${r.name}`} reason={r} rank={i + 1} />
                     ))}
                   </div>
+                  <p className="mt-2.5 text-[10px] text-slate-400 leading-relaxed">
+                    GINEConv×ChemBERTa Differential Cross-Attention 기반 작용기 기여도 분석
+                  </p>
                 </div>
               )}
+
             </div>
 
             {/* 우측: 분자 구조 + 물성치 */}
             <div className="space-y-4 lg:col-span-2">
 
               {/* 분자 구조 SVG (XAI 하이라이트) */}
-              {result.molecule_svg && (
+              {moleculeSvg && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">
                     분자 구조 (XAI 원자 기여도 오버레이)
@@ -390,7 +470,7 @@ export default function SinglePredictView() {
                   <div
                     className="molecule-svg flex justify-center overflow-hidden rounded-lg bg-slate-50/50"
                     /* SVG는 백엔드 RDKit 렌더링 결과이므로 안전. 외부 입력 SMILES는 이미 유효성 검증됨. */
-                    dangerouslySetInnerHTML={{ __html: sanitizeSvg(result.molecule_svg) }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeSvg(moleculeSvg) }}
                     aria-label="XAI 원자 기여도 분자 구조 이미지"
                   />
                   <p className="mt-2 text-center text-[11px] text-slate-400">

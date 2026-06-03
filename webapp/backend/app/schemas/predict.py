@@ -49,6 +49,25 @@ class MaccsPattern(BaseModel):
     )
 
 
+class ToxicReason(BaseModel):
+    """SMARTS 작용기 기반 독성 원인 기여 정보 (XAI 해석 결과)."""
+    name: str = Field(
+        ...,
+        description="작용기 이름 (예: 'Nitro Group') 또는 폴백 시 'Atom #N (X)' 형태",
+    )
+    importance: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="TOP-K 내 합산 기준 정규화된 기여도 (0~1). UI Progress Bar 폭으로 사용.",
+    )
+    rank: int = Field(
+        ...,
+        ge=1,
+        description="기여도 순위 (1 = 가장 높음)",
+    )
+
+
 class PhysChemProps(BaseModel):
     """RDKit Descriptors 기반 물리화학 특성."""
     molecular_weight: float = Field(..., description="정확 분자량 (ExactMolWt, Da)")
@@ -102,6 +121,14 @@ class SinglePredictResponse(BaseModel):
     top_maccs_patterns: list[MaccsPattern] = Field(
         default_factory=list,
         description="어텐션 기여도 상위 3개 MACCS 구조 패턴",
+    )
+    toxic_reasons: list[ToxicReason] = Field(
+        default_factory=list,
+        description=(
+            "SMARTS 작용기 매핑 기반 독성 원인 TOP 3. "
+            "include_xai=False 또는 분자 구조 특이 케이스 시 빈 배열 또는 "
+            "원자 레벨 폴백('Atom #N (X)') 포함."
+        ),
     )
     physicochemical: PhysChemProps = Field(..., description="물리화학 특성 세트")
     molecule_svg: str = Field(
