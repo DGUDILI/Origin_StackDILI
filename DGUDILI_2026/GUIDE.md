@@ -2,7 +2,7 @@
 
 ## Overview
 
-GraphMACCSEncoder: GraphSAGE + MACCS DifferentialCrossAttention + ChemBERTa 융합 DILI 예측 모델.
+GraphMACCSEncoder: **GINEConv** + MACCS DifferentialCrossAttention + ChemBERTa 융합 DILI 예측 모델.
 
 ### Architecture Evolution
 

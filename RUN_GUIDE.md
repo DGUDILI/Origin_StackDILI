@@ -1,6 +1,54 @@
 # DGUDILI 2026 — 실행 가이드
 
-## Docker로 실행
+---
+
+## 웹 대시보드 실행 (React + FastAPI)
+
+```bash
+cd Origin_StackDILI/webapp
+
+# 최초 빌드 (약 3~5분 소요 — torch, rdkit, ChemBERTa 다운로드 포함)
+docker-compose build --no-cache
+
+# 컨테이너 시작
+docker-compose up -d
+
+# 접속
+# 프론트엔드: http://localhost:3000
+# 백엔드 API: http://localhost:8000
+# API 문서:   http://localhost:8000/docs
+```
+
+### 코드 수정 후 반영
+
+```bash
+cd Origin_StackDILI/webapp
+
+# 프론트엔드만 수정한 경우
+docker-compose build --no-cache frontend
+docker-compose up -d
+
+# 백엔드만 수정한 경우 (xai.py, inference.py 등)
+docker-compose build --no-cache backend
+docker-compose up -d
+
+# 둘 다 수정한 경우
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+### 컨테이너 구성
+
+| 컨테이너 | 이미지 | 포트 | 역할 |
+|---|---|---|---|
+| `dgudili-frontend` | Nginx (Vite 빌드 정적 서빙) | 3000:80 | React 대시보드 |
+| `dgudili-backend` | Python 3.10-slim | 8000:8000 | FastAPI 추론 서버 |
+
+> 모델 가중치(`pretrained_graph_encoder.pt`)는 `webapp/backend/weights/`에 있어야 합니다.
+
+---
+
+## ML 파이프라인 실행 — Docker로 실행
 
 ```bash
 cd Origin_StackDILI

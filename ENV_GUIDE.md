@@ -191,7 +191,7 @@ bash run.sh shell
 
 ### Step 2 — GraphMACCSEncoder 학습 (`Step2_pretrain.py`)
 - ChemBERTa-77M-MLM last-layer: lr=1e-4
-- GraphSAGE + DifferentialCrossAttention (나머지 파라미터): lr=3e-4
+- GINEConv + DifferentialCrossAttention (나머지 파라미터): lr=3e-4
 - 조기종료: val AUC 기준, patience=30, max 200 epochs
 - 출력: `outputs/pretrained_graph_encoder.pt`
 
@@ -291,7 +291,7 @@ SEED           = 42
 EPOCHS         = 200
 PATIENCE       = 30
 LR_CHEM        = 1e-4   # ChemBERTa last-layer lr
-LR_OTHER       = 3e-4   # GraphSAGE + DiffAttn lr
+LR_OTHER       = 3e-4   # GINEConv + DiffAttn lr
 ```
 
 ---

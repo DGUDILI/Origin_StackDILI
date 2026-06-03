@@ -159,7 +159,9 @@ scores = softmax(Q1@K1^T/√d) - λ · softmax(Q2@K2^T/√d)
 - a1이 주목하는 MACCS key에서 a2가 공통으로 주목하는 "노이즈"를 차감
 - inactive MACCS bits: scores에 -1e9 마스킹 → attention ≈ 0
 - GroupNorm + (1 - λ_init) 스케일 보정으로 출력 안정화
-- attn_weights (head 평균) 저장 → Step4_xai.py에서 히트맵 생성
+- `multihead_scores` (B, h, MAX_ATOMS, 167) 저장 → Step4_xai.py 및 웹앱 XAI 파이프라인에서 활용
+  - Step4_xai.py: `get_attn_weights()` (head 평균) 기반 seaborn 히트맵
+  - 웹앱 `xai.py`: `diff_attn.multihead_scores` (4헤드 원본) → ReLU → Min-Max 정규화 → SVG 오버레이 + SMARTS 작용기 매핑
 
 ---
 
