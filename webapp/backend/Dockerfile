@@ -2,6 +2,7 @@ FROM python:3.10-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 libxext6 libsm6 curl \
+    libexpat1 libfreetype6 libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

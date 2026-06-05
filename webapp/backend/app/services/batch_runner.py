@@ -177,7 +177,7 @@ def _process_row(smiles_raw: str) -> dict:
 
     # ── 모델 추론 (include_xai=False → SVG/MACCS 생략, 속도 최적화) ───────
     try:
-        prob_pct, _, _ = _run_model_inference(smiles, canonical, include_xai=False)
+        prob_pct, *_ = _run_model_inference(smiles, canonical, include_xai=False)
     except (InvalidSmilesError, InferenceError) as exc:
         return {
             **_ERROR_ROW_DEFAULTS,

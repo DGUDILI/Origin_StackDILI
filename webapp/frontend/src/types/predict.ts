@@ -58,6 +58,29 @@ export interface MaccsPattern {
 }
 
 /**
+ * SMARTS 작용기 기반 독성 원인 기여 정보 (XAI 해석 결과)
+ * backend: ToxicReason
+ *
+ * 정상: 18가지 SMARTS_FG_LIST 중 매칭된 작용기 (예: "Nitro Group", "Phenol")
+ * 폴백: SMARTS 미매칭 또는 all-zero importance 시 "Atom #N (C)" 형태
+ */
+export interface ToxicReason {
+  /**
+   * 작용기 이름 또는 폴백 형태
+   * - 정상: "Nitro Group", "Aromatic Amine", "Phenol" 등
+   * - 폴백: "Atom #3 (N)", "Atom #7 (C)" 등
+   */
+  name: string;
+  /**
+   * TOP-K 내 합산 기준 정규화된 기여도 (0.0 ~ 1.0)
+   * Progress Bar 폭으로 사용: style={{ width: `${importance * 100}%` }}
+   */
+  importance: number;
+  /** 기여도 순위 (1 = 가장 높음) */
+  rank: number;
+}
+
+/**
  * RDKit Descriptors 기반 물리화학 특성 9종 + Lipinski 위반 수
  * backend: PhysChemProps (computed_field: lipinski_violations)
  *
@@ -115,6 +138,13 @@ export interface SinglePredictResponse {
    * include_xai=false 요청 시 빈 배열
    */
   top_maccs_patterns: MaccsPattern[];
+  /**
+   * SMARTS 작용기 매핑 기반 독성 원인 TOP 3
+   * - 정상: 18가지 작용기 중 어텐션 기여도 상위 3개
+   * - 폴백: 매칭 없거나 all-zero importance → "Atom #N (C)" 원자 레벨
+   * - include_xai=false 요청 시 빈 배열
+   */
+  toxic_reasons: ToxicReason[];
   /** 물리화학 특성 세트 */
   physicochemical: PhysChemProps;
   /**

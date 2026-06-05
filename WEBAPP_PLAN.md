@@ -78,25 +78,16 @@ Origin_StackDILI/          ← 현재 레포 루트
 │   │   │   ├── api/
 │   │   │   │   └── client.ts        # Axios 인스턴스 + API 함수
 │   │   │   ├── types/
-│   │   │   │   └── api.ts           # TypeScript 타입 정의
+│   │   │   │   └── predict.ts       # TypeScript 타입 (백엔드 schemas/predict.py 1:1 매핑)
 │   │   │   ├── components/
-│   │   │   │   ├── layout/
-│   │   │   │   │   ├── Header.tsx
-│   │   │   │   │   └── TabNav.tsx
-│   │   │   │   ├── single/
-│   │   │   │   │   ├── SmilesInput.tsx
-│   │   │   │   │   ├── RiskGauge.tsx         # 위험도 게이지바
-│   │   │   │   │   ├── ToxicityPatternCard.tsx
-│   │   │   │   │   ├── MoleculeViewer.tsx    # SVG 렌더링
-│   │   │   │   │   └── PhysChemTable.tsx
-│   │   │   │   └── batch/
-│   │   │   │       ├── DropZone.tsx          # 드래그앤드롭 업로드
-│   │   │   │       ├── ProgressBar.tsx
-│   │   │   │       ├── ResultTable.tsx       # 정렬/필터 테이블
-│   │   │   │       └── DownloadButton.tsx
-│   │   │   └── pages/
-│   │   │       ├── SinglePage.tsx
-│   │   │       └── BatchPage.tsx
+│   │   │   │   ├── SinglePredictView.tsx  # 단일 분석 뷰 (입력+결과 통합)
+│   │   │   │   │   # 내장 컴포넌트:
+│   │   │   │   │   # - ToxicReasonCard   : SMARTS 작용기 기여도 게이지 바 카드
+│   │   │   │   │   # - MaccsPatternCard  : MACCS 비트 기여도 카드 (제거됨)
+│   │   │   │   ├── BatchScreeningView.tsx # 배치 CSV 업로드 + 진행률 + 결과 테이블
+│   │   │   │   ├── ModelInfoView.tsx      # 모델 아키텍처 소개 탭
+│   │   │   │   ├── RiskGauge.tsx          # 반원 게이지 (확률 → 색상)
+│   │   │   │   └── PhysChemTable.tsx      # 물성치 테이블 + Lipinski 위반 표시
 │   │   ├── index.html
 │   │   ├── package.json
 │   │   ├── vite.config.ts
@@ -246,34 +237,50 @@ RDKit 기반 유틸리티.
 **주의:** RDKit은 thread-safe하지 않으므로 `asyncio.to_thread` 또는 `ThreadPoolExecutor`로 래핑.
 
 ### 1-5. `app/services/xai.py`
-DifferentialCrossAttention 가중치 → 원자 중요도 변환.
+Differential Cross-Attention 멀티헤드 어텐션 → XAI 산출물 전체 파이프라인.
 
-**기능:**
-- `extract_atom_importance(attn_weights, n_atoms) → np.ndarray`:  
-  shape `(1, n_atoms, 167)` → `relu()` 적용 → sum over MACCS dim → L1 정규화 → `(n_atoms,)` 배열
-- `extract_top_maccs(attn_weights, top_k=3) → list[dict]`:  
-  MACCS 축 합산 후 상위 k개 인덱스 추출 → `MACCS_NAMES[idx]`, 중요도 점수 반환
-- `build_xai_svg(smiles, attn_weights, n_atoms) → str`:  
-  atom_importance 계산 → chemistry.smiles_to_svg 호출 → SVG 반환
+**주요 함수:**
+- `extract_mh_scores_numpy(mh_raw, n_atoms) → np.ndarray`:  
+  `(B, h, MAX_ATOMS, 167)` → ReLU → bit 0 제외 → `(h, n_atoms, 166)` numpy
+- `compute_atom_importance(mh_scores) → np.ndarray`:  
+  4헤드 × 166비트 합산 → Min-Max 정규화 → `(n_atoms,)` [0, 1]
+- `extract_top_maccs_patterns(mh_scores, smiles, top_k) → list[MaccsPatternScore]`:  
+  MACCS 축 합산 → **실제 분자 활성 비트(MACCSkeys) 마스킹** → 상위 k개 반환  
+  이름은 `smartsPatts` 실제 SMARTS 기반 파생 (`MACCS_NAMES` 불사용 — 비트 번호 불일치)
+- `compute_fg_toxic_reasons(smiles, atom_importance, top_k=5) → list[ToxicReasonScore]`:  
+  18가지 SMARTS 작용기 패턴 매칭 → 원자 기여도 합산 → 부족분 원자 레벨 폴백 →  
+  **통합 정규화 (TOP-K 합계 = 정확히 100%)** → 기여도 내림차순 정렬
+- `render_xai_svg(smiles, atom_importance, prob) → str`:  
+  prob > 45% → 빨강 그라디언트, ≤ 45% → 파랑 그라디언트, 원자+결합 하이라이트
+- `build_xai_outputs(mh_raw, smiles, n_atoms, prob, top_k) → tuple[list, list, str]`:  
+  퍼사드 — `(top_maccs, toxic_reasons, svg_string)` 반환
+
+**SMARTS_FG_LIST (18가지):** Nitro Group, Aromatic Amine, Aliphatic Amine, Secondary Amine, Amide, Phenol, Hydroxyl, Carboxylic Acid, Ester, Aldehyde, Ketone, Epoxide, Thiol, Thioether, Sulfoxide, Sulfonamide, Halide, Imine
 
 ### 1-6. `app/services/inference.py`
-단일 SMILES 추론 서비스.
+단일 SMILES 추론 서비스 (스레드 안전성 설계 포함).
 
 ```python
-async def predict_single(smiles: str) -> SinglePredictResponse:
-    # 1. SMILES 유효성 검사
-    # 2. 토큰화 (ChemBERTa)
+async def predict_single(smiles: str, include_xai: bool = True) -> SinglePredictResponse:
+    # 1. SMILES 유효성 검사 + Canonical 변환  [asyncio.to_thread]
+    # 2. (실패 시) PubChem 분자 이름 조회      [endpoint 레벨]
+    # ── threading.Lock 구간 (Forward pass 직렬화) ──
     # 3. PyG 그래프 생성 (smiles_to_pyg)
-    # 4. MACCS 생성 (get_maccs)
-    # 5. model.forward() → logit → sigmoid → probability
-    # 6. model.get_attn_weights() → XAI
-    # 7. atom_importance 계산 → SVG 생성 (asyncio.to_thread)
-    # 8. physicochemical props 계산
-    # 9. top-3 MACCS 패턴 추출
-    # 10. 반환
+    # 4. MACCS 167-dim 벡터 (get_maccs)
+    # 5. ChemBERTa 토크나이저 인코딩
+    # 6. model.forward() → logit → sigmoid → probability (0~100%)
+    # 7. model.diff_attn.multihead_scores.clone() 즉시 복사   ← 핵심
+    # ── Lock 해제 후 (numpy/RDKit, thread-safe) ──
+    # 8. extract_mh_scores_numpy() → ReLU → (h, n_atoms, 166)
+    # 9. compute_atom_importance() → Min-Max [0,1]
+    # 10. extract_top_maccs_patterns() → 활성 비트 마스킹 → TOP-K
+    # 11. compute_fg_toxic_reasons() → SMARTS 18종 → TOP-5 → 정규화
+    # 12. render_xai_svg() → 빨강/파랑 그라디언트 SVG
+    # 13. get_physicochemical_props()  [asyncio.to_thread]
+    # 14. SinglePredictResponse 조립 및 반환
 ```
 
-**CPU 전용 추론이므로 `asyncio.to_thread`로 blocking 연산 비동기화.**
+**스레드 안전성:** `model.diff_attn.multihead_scores`는 Forward pass마다 덮어씌워지므로 `threading.Lock` 구간 내에서 `.clone()`으로 즉시 복사. numpy/RDKit 처리는 Lock 외부에서 수행해 처리량 극대화.
 
 ### 1-7. `app/services/batch_runner.py`
 배치 처리 + 태스크 상태 관리.
@@ -317,31 +324,41 @@ class TaskState:
 ```python
 # Request
 class SinglePredictRequest(BaseModel):
-    smiles: str
+    smiles: str                  # SMILES 또는 영문 분자 이름 (PubChem 조회 지원)
     include_xai: bool = True
 
-# Response  
+# Response 서브모델
 class MaccsPattern(BaseModel):
-    bit_index: int
-    name: str
-    importance: float
+    bit_index: int               # MACCS bit 인덱스 (1~166)
+    name: str                    # smartsPatts 실제 SMARTS 기반 이름
+    importance: float            # 활성 비트 내 기여 비율 (0~1)
+
+class ToxicReason(BaseModel):   # ← 신규 (SMARTS 작용기 기반 XAI)
+    name: str                    # 작용기명 또는 "Atom #N (X)" 폴백
+    importance: float            # TOP-K 합산 정규화 기여도 (0~1, 합계=1.0)
+    rank: int                    # 기여도 순위 (1=최고)
 
 class PhysChemProps(BaseModel):
     molecular_weight: float
     logp: float
-    hbd: int        # H-bond donors
-    hba: int        # H-bond acceptors
+    hbd: int
+    hba: int
     tpsa: float
     rotatable_bonds: int
     qed: float
+    ring_count: int              # ← 신규
+    aromatic_rings: int          # ← 신규
+    lipinski_violations: int     # computed_field: MW>500, LogP>5, HBD>5, HBA>10
 
 class SinglePredictResponse(BaseModel):
-    smiles: str
-    probability: float           # 0.0 ~ 1.0
+    smiles: str                  # 사용자 입력 원본
+    canonical_smiles: str        # ← 신규: RDKit Canonical SMILES
+    probability: float           # 0.0 ~ 100.0 (%)
     risk_level: str              # "HIGH" | "LOW"
     top_maccs_patterns: list[MaccsPattern]
+    toxic_reasons: list[ToxicReason]  # ← 신규: SMARTS 작용기 TOP 5
     physicochemical: PhysChemProps
-    molecule_svg: str            # SVG 문자열 (XAI 오버레이 포함)
+    molecule_svg: str            # XAI 원자+결합 하이라이트 SVG
 
 # Batch
 class BatchStatusResponse(BaseModel):
@@ -350,7 +367,7 @@ class BatchStatusResponse(BaseModel):
     total: int
     processed: int
     progress_pct: float
-    result_download_url: str | None = None  # S3 presigned URL
+    has_result: bool             # ← 신규: 다운로드 가능 여부
     error: str | None = None
 ```
 
@@ -402,24 +419,30 @@ app.include_router(v1_router, prefix="/api/v1")
 ### 1-11. `Dockerfile` (backend)
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-# RDKit 의존성
-RUN apt-get update && apt-get install -y libxrender1 libxext6 && rm -rf /var/lib/apt/lists/*
+# RDKit SVG 렌더링 필수 시스템 라이브러리
+# libexpat1    : RDKit rdMolDraw2D SVG XML 파싱
+# libfreetype6 : 원자 레이블 폰트 렌더링
+# libfontconfig1: 폰트 설정
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxrender1 libxext6 libsm6 curl \
+    libexpat1 libfreetype6 libfontconfig1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-
-# 모델 가중치는 빌드 타임 COPY 또는 S3에서 런타임 다운로드 (변수로 선택)
-# 기본: 빌드 시 weights/ 폴더 포함
+COPY app/ ./app/
 COPY weights/ ./weights/
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# workers=1 고정: 모델 싱글턴이 프로세스 간 공유 안 됨
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 ```
+
+> **주의:** `python:3.10-slim`은 XML/폰트 관련 시스템 라이브러리를 제거한 이미지이므로 `libexpat1` 등을 명시적으로 설치해야 합니다. 누락 시 RDKit SVG 렌더링이 `libexpat.so.1: cannot open shared object file` 오류로 전면 실패합니다.
 
 > **모델 가중치 전략:** `pretrained_graph_encoder.pt`(~수십MB)는 ECR 이미지에 포함하거나 S3에서 `lifespan` 시작 시 `boto3.download_file`로 받는 방식 중 선택. 빠른 cold start 위해 이미지 포함 권장.
 
@@ -495,10 +518,11 @@ export const getBatchStatus = (taskId: string) =>
 - 중앙에 확률 퍼센트 표시 (bold, 32px)
 - Tailwind `transition-colors duration-500`으로 색상 변환 애니메이션
 
-#### `single/ToxicityPatternCard.tsx`
-- Top 3 MACCS 패턴 카드 3개 수평 배치
-- 각 카드: 패턴 이름, 중요도 점수 (progress bar), bit 인덱스
-- Tailwind `ring-1 ring-amber-200 bg-amber-50` (경고 톤)
+#### `ToxicReasonCard` (SinglePredictView.tsx 내장)
+- SMARTS 기반 독성 원인 작용기 TOP 5 카드 (세로 목록)
+- 각 카드: 순위 배지, 작용기명, 기여도 % (Progress Bar), 폴백 시 "(원자 레벨)" 뱃지
+- 색상: 1순위 빨강(`border-red-200 bg-red-50`), 2~5위 주황(`border-orange-100 bg-orange-50`), 원자 폴백 회색
+- 기여도 합계 반드시 100%: TOP-K raw score 통합 정규화 적용
 
 #### `single/MoleculeViewer.tsx`
 - `<div dangerouslySetInnerHTML={{ __html: svg }}>`로 SVG 직접 렌더링
